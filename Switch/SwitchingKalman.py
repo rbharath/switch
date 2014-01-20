@@ -6,6 +6,7 @@ from numpy.linalg import svd, inv
 from numpy.random import randint, randn, multinomial, multivariate_normal
 from numpy.random import rand
 from Kmeans import *
+from utils import *
 import scipy.linalg as linalg
 import scipy.stats as stats
 import sys
@@ -21,9 +22,6 @@ The switch posteriors are used in the M-step to update parameter estimates.
 """
 
 EPSILON=1e-15
-GAMMA = 0.0
-DISP_TIME = 1000000
-# Regularization
 
 class SwitchingKalmanFilter(object):
   """Implements a Switching Kalman Filter along with an EM algorithm.
@@ -67,8 +65,6 @@ class SwitchingKalmanFilter(object):
     if bs != None and shape(bs) == (K, x_dim):
       self.bs = copy(bs)
     else:
-      # Need to fix this for learning
-      #self.bs = zeros((K,x_dim))
       self.bs = randn(K,x_dim)
     if Qs != None and shape(Qs) == (K, x_dim, x_dim):
       self.Qs = copy(Qs)
@@ -136,51 +132,7 @@ class SwitchingKalmanFilter(object):
         b = rand(x_dim)
         self.bs[i] = b
 
-  def reinitialize_params(self, em_vars):
-    K = self.K
-    x_dim = self.x_dim
-    if 'bs' in em_vars:
-      for i in range(K):
-        b = rand(x_dim)
-        self.bs[i] = b
-    if 'As' in em_vars:
-      for i in range(K):
-        A = randn(x_dim, x_dim)
-        # Stabilize A
-        u,s,v = svd(A)
-        s = maximum(minimum(s,1.0), -1.0)
-        self.As[i] = dot(u, dot(diag(s), v))
-    if 'Qs' in em_vars:
-      for i in range(K):
-        r = rand(x_dim, x_dim)
-        r = dot(r,r.T)
-        self.Qs[i] = 0.01 * r
-    if 'Cs' in em_vars:
-      for i in range(K):
-        if y_dim >= x_dim:
-          self.Cs[i,:x_dim,:] = eye(x_dim)
-        else:
-          self.Cs[i,:,:y_dim] = eye(y_dim)
-    if 'Rs' in em_vars:
-      for i in range(K):
-        self.Rs[i] = 0.01 * eye(y_dim)
-    if 'Z' in em_vars:
-      self.Z = rand(K,K)
-      self.Z = self.Z / (sum(self.Z,axis=0))
-    if 'pi' in em_vars:
-      self.pi = rand(K)
-      self.pi = self.pi/sum(self.pi)
-    if 'mus' in em_vars:
-      self.mus = zeros((K,x_dim))
-      for i in range(K):
-        self.mus[i] = randn(x_dim)
-    if 'Sigmas' in em_vars:
-      for i in range(K):
-        r = rand(x_dim, x_dim)
-        r = dot(r,r.T)
-        self.Sigmas[i] = 0.1 * eye(x_dim) + r
-
-  def simulate(self, T, s_init=None,x_init=None,y_init=None):
+  def sample(self, T, s_init=None,x_init=None,y_init=None):
     """
     Inputs:
       T: time to run simulation
@@ -237,7 +189,6 @@ class SwitchingKalmanFilter(object):
     Intermediate:
       L_ij_t = P[y_t|y_{1:t-1},S_{t-1} = i, S_t = j]
     """
-    DEBUG = True
     T = shape(ys)[0]
     x_dim, K = self.x_dim, self.K
     # Allocate Memory for Outputs
@@ -284,20 +235,11 @@ class SwitchingKalmanFilter(object):
         W_ij[t,:,j] = logM_t_1t[t,:,j] - logM_tt[t,j]
         W_ij[t,:,j] -= logsumexp(W_ij[t,:,j])
         W_ij[t,:,j] = exp(W_ij[t,:,j])
-        #else:
-        #  W_ij[t,:,j] = 1 # set to uniform in absence of other info
-        #if sum(W_ij[t,:,j]) == 0:
-        #  raise ValueError
-        #if M_tt[t-1,j] > 0:
         F_ij[t,j,:] = logM_t_1t[t,j,:] - logM_tt[t-1,j]
         F_ij[t,j,:] -= logsumexp(F_ij[t,j,:])
         F_ij[t,j,:] = exp(F_ij[t,j,:])
-        #if sum(F_ij[t,j,:]) == 0:
-        #  raise ValueError
       for i in range(K):
-        #if M_tt[t-1,i] > 0:
         for j in range(K):
-          #if F_ij[t,i,j] > 0:
           log_ll_j_t[t,j] += F_ij[t,i,j] * (log_ll_j_t[t-1,i] +
               L_ij_t[t,i,j])
       for j in range(K):
@@ -337,7 +279,6 @@ class SwitchingKalmanFilter(object):
       x_e_k_tT = E[X_t|y_{1:T},S_{t+1}=k]
       V_tt_1T = E[X_t,X_{t-1}|y_{1:T}]
     """
-    DEBUG = False
     T = shape(ys)[0]
     # Extract Dimensionality Information
     x_dim, K = self.x_dim, self.K
@@ -417,7 +358,6 @@ class SwitchingKalmanFilter(object):
     Intermediates:
       S_k_t_1_x_1t = P[S_{t+1} = k|x_{1:t}]
     """
-    DEBUG = False
     (T,x_dim) = shape(xs)
     K = self.K
     # Initialize Memory
@@ -474,121 +414,40 @@ class SwitchingKalmanFilter(object):
          S_jk_tt_1_x_1T[t,j,k] = S_j_t_x_1T[t,j] * self.Z[j,k]
     return (S_j_t_x_1t, S_j_t_x_1T, S_jk_tt_1_x_1T)
 
-  def fully_observable_daem(self,xs, ys, em_num_sched=10,
-      em_iters=10,em_vars='all'):
+  def em(self, ys, em_iters=10, em_vars='all'):
     """
-    Inputs:
-      xs: A sequence
-    Outputs:
-      None (all updates are made to internal states)
-    """
-    if em_vars == 'all':
-      em_vars = ['As', 'Qs', 'mus', 'Sigmas', 'Z', 'pi', 'Cs', 'Rs']
-    (T,_) = shape(xs)
-    K, x_dim = self.K, self.x_dim
-    S_j_t_x_1Ts = zeros((T,K))
-    S_jk_tt_1_x_1Ts = zeros((T,K,K))
-    beta = 0.10/em_num_sched
-    const = (1.0/beta) ** (1.0/max(em_num_sched-1,1))
-    for sched in range(em_num_sched):
-      print "EM Schedule Num = %d" % sched
-      print "beta = %f" % beta
-      print "const = %f" % const
-      for itr in range(em_iters):
-        print "EM Iteration = %d" % itr
-        # Now perform inference
-        (_, S_j_t_x_1T, S_jk_tt_1_x_1T) = self.inference(xs)
-        self.em_update(S_j_t_x_1Ts, S_jk_tt_1_x_1Ts, xs, ys,
-            sched, itr, em_vars, beta)
-      beta = min(beta * const, 1.0)
-
-  def daem(self, ys, em_num_sched = 10, em_iters=10, em_vars='all'):
-    """
-    Deterministic Annealing EM
+    Expectation Maximization
     Inputs:
       ys: A sequence of shape (T, y_dim)
     Outputs:
       None (all updates are made to internal states)
     """
     if em_vars == 'all':
-      em_vars = ['As', 'Qs', 'mus', 'Sigmas', 'Zs', 'pis', 'Cs', 'Rs']
+      em_vars = ['As', 'Qs', 'mus', 'Sigmas', 'Zs', 'pi', 'Cs', 'Rs']
     (T,_) = shape(ys)
     K, x_dim, y_dim = self.K, self.x_dim, self.y_dim
+
     # regularization
     alpha = 0.1 * T
+    itr = 0
+    while itr < em_iters:
+      print "\tEM Iteration = %d" % itr
+      (_, logM_tts, _, x_j_tts, x_tts,
+          V_j_tts, V_ij_tt_1s, log_ll_j_ts, log_ll_ts) \
+              = self.filter(ys)
+      print "\t\tLog_ll = %s" % str(log_ll_ts[T-1])
+      # Now perform smoothing
+      (x_j_tTs, _, _, logM_tt_1Ts, _, _, x_tTs, _) = \
+          self.smooth(x_j_tts, V_j_tts,
+              V_ij_tt_1s, logM_tts, ys)
+      # Now perform inference
+      (_, S_j_t_x_1Ts, S_jk_tt_1_x_1Ts) = \
+          self.inference(x_tTs)
+      self.em_update(S_j_t_x_1Ts, S_jk_tt_1_x_1Ts,
+          x_tTs, ys, alpha, itr, em_vars)
+      itr += 1
 
-    # For debugging purposes
-    out_x_tts = zeros((em_num_sched, em_iters,T,x_dim))
-    out_x_tTs = zeros((em_num_sched, em_iters,T,x_dim))
-    out_x_j_tTs = zeros((em_num_sched, em_iters,T,K,x_dim))
-    out_x_j_tts = zeros((em_num_sched, em_iters,T,K,x_dim))
-    out_V_j_tts = zeros((em_num_sched, em_iters,T,K,x_dim,x_dim))
-    out_log_ll_j_ts = zeros((em_num_sched, em_iters,T,K))
-    out_log_ll_ts = zeros((em_num_sched, em_iters,T))
-    out_W_i_Ts = zeros((em_num_sched, em_iters,T,K))
-    mus_iter = zeros((em_num_sched, em_iters, K, x_dim))
-    Sigmas_iter = zeros((em_num_sched, em_iters, K, x_dim, x_dim))
-    out_Ds = zeros((em_num_sched, em_iters, K, x_dim, x_dim))
-    As_iter = zeros((em_num_sched, em_iters, K, x_dim, x_dim))
-    bs_iter = zeros((em_num_sched, em_iters, K, x_dim))
-    Qs_iter = zeros((em_num_sched, em_iters, K, x_dim, x_dim))
-    Cs_iter = zeros((em_num_sched, em_iters, K, y_dim, x_dim))
-    Rs_iter = zeros((em_num_sched, em_iters, K, y_dim, y_dim))
-    Z_iter = zeros((em_num_sched, em_iters, K, K))
-    pi_iter = zeros((em_num_sched, em_iters, K))
-    beta = 1.0/em_num_sched
-    const = (1.0/beta) ** (1.0/max(em_num_sched-1,1))
-    for sched in range(em_num_sched):
-      print "EM Schedule Num = %d" % sched
-      print "beta = %f" % beta
-      print "const = %f" % const
-      itr = 0
-      while itr < em_iters:
-        mus_iter[sched, itr] = self.mus
-        Sigmas_iter[sched, itr] = self.Sigmas
-        As_iter[sched, itr] = self.As
-        Qs_iter[sched, itr] = self.Qs
-        Cs_iter[sched, itr] = self.Cs
-        Rs_iter[sched, itr] = self.Rs
-        pi_iter[sched, itr] = self.pi
-        Z_iter[sched, itr] = self.Z
-        bs_iter[sched, itr] = self.bs
-        #try:
-        print "\tEM Iteration = %d" % itr
-        (_, logM_tts, _, x_j_tts, x_tts,
-            V_j_tts, V_ij_tt_1s, log_ll_j_ts, log_ll_ts) \
-                = self.filter(ys)
-        print "\t\tLog_ll = %s" % str(log_ll_ts[T-1])
-        out_x_tts[sched, itr] = x_tts
-        out_x_j_tts[sched, itr] = x_j_tts
-        out_V_j_tts[sched, itr] = V_j_tts
-        out_log_ll_j_ts[sched, itr] = log_ll_j_ts
-        out_log_ll_ts[sched, itr] = log_ll_ts
-        # Now perform smoothing
-        (x_j_tTs, _, _, logM_tt_1Ts, _, _, x_tTs, _) = \
-            self.smooth(x_j_tts, V_j_tts,
-                V_ij_tt_1s, logM_tts, ys)
-        out_x_tTs[sched, itr] = x_tTs
-        out_x_j_tTs[sched, itr] = x_j_tTs
-        # Now perform inference
-        (_, S_j_t_x_1Ts, S_jk_tt_1_x_1Ts) = \
-            self.inference(x_tTs)
-        out_W_i_Ts[sched, itr] = S_j_t_x_1Ts
-        out_Ds[sched, itr] = empirical_wells(ys,
-            out_W_i_Ts[sched, itr])[1]
-        self.em_update(S_j_t_x_1Ts, S_jk_tt_1_x_1Ts,
-            x_tTs, ys, alpha, sched, itr, em_vars, beta)
-        itr += 1
-        #except FloatingPointError:
-        #  itr += 1
-        #  continue
-      beta = min(beta * const, 1.0)
-    return (out_x_tTs, out_x_tts, out_x_j_tTs, out_x_j_tts, out_V_j_tts,
-        out_log_ll_j_ts, out_log_ll_ts, out_W_i_Ts, out_Ds, mus_iter,
-        Sigmas_iter, As_iter, bs_iter, Qs_iter, Cs_iter, Rs_iter, pi_iter,
-        Z_iter)
-
-  def em_update(self, W_i_T, M_tt_1T, x_tT, ys, alpha, sched, itr,
+  def em_update(self, W_i_T, M_tt_1T, x_tT, ys, alpha, itr,
       em_vars='all', beta=1.0):
     """
     TODO: Add support for C and R learning
@@ -619,100 +478,128 @@ class SwitchingKalmanFilter(object):
       P_cur[t] = outer(x_tT[t], x_tT[t])
     # Update Cs
     if 'Cs' in em_vars:
-      for i in range(K):
-        Cnum = zeros((y_dim, x_dim))
-        Cdenom = zeros((x_dim, x_dim))
-        for t in range(0,T):
-          Cnum += W_i_T[t,i] * outer(ys[t], x_tT[t])
-          Cdenom += W_i_T[t,i] * P_cur[t]
-        C = dot(Cnum, linalg.pinv(Cdenom))
-        self.Cs[i] = C
-        #if x_dim == y_dim: # Figure out a way to generalize...
-        #  # Stabilize C
-        #  u,s,v = svd(C)
-        #  s = maximum(minimum(s,1.0), -1.0)
-        #  #s = minimum(s,1.0)
-        #  self.Cs[i] = dot(u, dot(diag(s), v))
-        #else:
-        #  self.Cs[i] = C
+      self.C_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT,
+          ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update Rs
     if 'Rs' in em_vars:
-      for i in range(self.K):
-        Rdenom = alpha
-        if x_dim == y_dim:
-          Lambda = alpha * eye(x_dim)
-        R1 = zeros((y_dim, y_dim))
-        R2 = zeros((x_dim, y_dim))
-        for t in range(T):
-          R1 += W_i_T[t,i] * outer(ys[t], ys[t])
-          R2 += W_i_T[t,i] * outer(x_tT[t], ys[t])
-          Rdenom += W_i_T[t,i]
-        Rnum = Lambda + R1 + dot(self.Cs[i], R2)
-        self.Rs[i] = (1/Rdenom) * Rnum
+      self.R_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT,
+          ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update As
     if 'As' in em_vars:
       self.A_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
             P_cur_prev, P_cur, itr)
     # Update bs
     if 'bs' in em_vars:
-      #Lambda = alpha * ones(x_dim)
-      for i in range(K):
-        bnum = zeros((x_dim))
-        bdenom = 0
-        for t in range(1,T):
-          bnum += W_i_T[t,i] * (x_tT[t] - dot(self.As[i], x_tT[t-1]))
-          bdenom += W_i_T[t,i]
-        self.bs[i] = (1/bdenom) * bnum
+      self.b_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+            P_cur_prev, P_cur, itr)
     # Update Qs
     if 'Qs' in em_vars:
       self.Q_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars, itr)
     # Update mus
     if 'mus' in em_vars:
-      for i in range(self.K):
-        mu_num = zeros(x_dim)
-        mu_denom = 0
-        mu_num += W_i_T[0,i] * x_tT[0]
-        mu_denom += W_i_T[0,i]
-        if mu_denom > 0:
-          self.mus[i] = (1/mu_denom) * mu_num
+      self.mu_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars, itr)
     # Update Sigmas
     if 'Sigmas' in em_vars:
-      Lambda = alpha * eye(x_dim)
-      for i in range(self.K):
-        Sigma_num_1 = zeros((x_dim, x_dim))
-        Sigma_num_2 = zeros((1, x_dim))
-        Sigma_num_3 = zeros((x_dim, 1))
-        Sigma_num_4 = 0
-        Sigma_num_1 += W_i_T[0,i] * outer(x_tT[0], x_tT[0])
-        Sigma_num_2 += W_i_T[0,i] * x_tT[0]
-        Sigma_num_2 += W_i_T[0,i] * x_tT[0]
-        Sigma_num_4 += W_i_T[0,i]
-        Sigma_denom = Sigma_num_4
-        Sigma_num = (Sigma_num_1 - outer(self.mus[i], Sigma_num_2) -
-            outer(Sigma_num_3, self.mus[i].T) +
-            Sigma_num_4 * outer(self.mus[i],self.mus[i]))
-        prop_sigma = (1/(Sigma_denom+alpha)) * (Lambda + Sigma_num)
-        # Adding in this test to ensure that we don't get non-psd matrices
-        if min(linalg.eig(prop_sigma)[0]) > 0:
-          self.Sigmas[i] = prop_sigma
+      self.sigma_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
+          ys, alpha, covars, itr)
     # Update Z
     if 'Z' in em_vars:
-      Z = zeros((K,K))
-      for i in range(K):
-        for j in range(K):
-          Z_denom = 0
-          for t in range(1,T):
-            Z[i,j] += M_tt_1T[t-1,i,j]
-            Z_denom += W_i_T[t,i]
-          Z[i,j] /= Z_denom
-      self.Z = (Z.T / (sum(Z,axis=1))).T
+      self.z_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
+          ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update pis
     if 'pi' in em_vars:
-      for i in range(self.K):
-        self.pi[i] += W_i_T[0,i]
-        self.pi[i] /= K
-      self.pi = self.pi/(sum(self.pi))
+      self.pi_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
+          ys, alpha, covars, P_cur_prev, P_cur, itr)
 
+  def C_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+        P_cur_prev, P_cur, itr):
+    for i in range(K):
+      Cnum = zeros((y_dim, x_dim))
+      Cdenom = zeros((x_dim, x_dim))
+      for t in range(0,T):
+        Cnum += W_i_T[t,i] * outer(ys[t], x_tT[t])
+        Cdenom += W_i_T[t,i] * P_cur[t]
+      C = dot(Cnum, linalg.pinv(Cdenom))
+      self.Cs[i] = C
+
+  def R_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+        P_cur_prev, P_cur, itr):
+    for i in range(self.K):
+      Rdenom = alpha
+      if x_dim == y_dim:
+        Lambda = alpha * eye(x_dim)
+      R1 = zeros((y_dim, y_dim))
+      R2 = zeros((x_dim, y_dim))
+      for t in range(T):
+        R1 += W_i_T[t,i] * outer(ys[t], ys[t])
+        R2 += W_i_T[t,i] * outer(x_tT[t], ys[t])
+        Rdenom += W_i_T[t,i]
+      Rnum = Lambda + R1 + dot(self.Cs[i], R2)
+      self.Rs[i] = (1/Rdenom) * Rnum
+
+  def b_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+        P_cur_prev, P_cur, itr):
+    K, x_dim = self.K, self.x_dim
+    for i in range(K):
+      bnum = zeros((x_dim))
+      bdenom = 0
+      for t in range(1,T):
+        bnum += W_i_T[t,i] * (x_tT[t] - dot(self.As[i], x_tT[t-1]))
+        bdenom += W_i_T[t,i]
+      self.bs[i] = (1/bdenom) * bnum
+
+  def mu_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+        P_cur_prev, P_cur, itr):
+    K, x_dim = self.K, self.x_dim
+    for i in range(K):
+      mu_num = zeros(x_dim)
+      mu_denom = 0
+      mu_num += W_i_T[0,i] * x_tT[0]
+      mu_denom += W_i_T[0,i]
+      if mu_denom > 0:
+        self.mus[i] = (1/mu_denom) * mu_num
+
+  def sigma_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+        P_cur_prev, P_cur, itr):
+    Lambda = alpha * eye(x_dim)
+    for i in range(self.K):
+      Sigma_num_1 = zeros((x_dim, x_dim))
+      Sigma_num_2 = zeros((1, x_dim))
+      Sigma_num_3 = zeros((x_dim, 1))
+      Sigma_num_4 = 0
+      Sigma_num_1 += W_i_T[0,i] * outer(x_tT[0], x_tT[0])
+      Sigma_num_2 += W_i_T[0,i] * x_tT[0]
+      Sigma_num_2 += W_i_T[0,i] * x_tT[0]
+      Sigma_num_4 += W_i_T[0,i]
+      Sigma_denom = Sigma_num_4
+      Sigma_num = (Sigma_num_1 - outer(self.mus[i], Sigma_num_2) -
+          outer(Sigma_num_3, self.mus[i].T) +
+          Sigma_num_4 * outer(self.mus[i],self.mus[i]))
+      prop_sigma = (1/(Sigma_denom+alpha)) * (Lambda + Sigma_num)
+      # Adding in this test to ensure that we don't get non-psd matrices
+      if min(linalg.eig(prop_sigma)[0]) > 0:
+        self.Sigmas[i] = prop_sigma
+
+  def z_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+        P_cur_prev, P_cur, itr):
+    K = self.K
+    Z = zeros((K,K))
+    for i in range(K):
+      for j in range(K):
+        Z_denom = 0
+        for t in range(1,T):
+          Z[i,j] += M_tt_1T[t-1,i,j]
+          Z_denom += W_i_T[t,i]
+        Z[i,j] /= Z_denom
+    self.Z = (Z.T / (sum(Z,axis=1))).T
+
+  def pi_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+        P_cur_prev, P_cur, itr):
+    K = self.K
+    for i in range(K):
+      self.pi[i] += W_i_T[0,i]
+      self.pi[i] /= K
+    self.pi = self.pi/(sum(self.pi))
 
   def A_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
@@ -778,13 +665,6 @@ class SwitchingKalmanFilter(object):
           x_t = x_tT[t]
           x_t_pred = dot(self.As[i], x_tT[t-1]) + self.bs[i]
           diff = x_t - x_t_pred
-          if mod(t,DISP_TIME) == 0:
-            print "\t\t\tt = %d" % t
-            print "\t\t\tx_t = %s" % (str(x_t))
-            print "\t\t\tx_t_pred = %s" % (str(x_t_pred))
-            print "\t\t\tdiff = %s" % str(diff)
-            print "\t\t\tW_i_T[%d,%d] = %s" % (t, i, str(W_i_T[t,i]))
-            print
           Qnum += W_i_T[t,i] * outer(diff, diff)
           Qdenom += W_i_T[t,i]
         Qgrad = -0.5 * Qnum + 0.5 * Qdenom * self.Qs[i]
@@ -816,48 +696,6 @@ class SwitchingKalmanFilter(object):
     for i in range(K):
       wells[i] = dot(inv(eye(x_dim) - self.As[i]), self.bs[i])
     return wells
-
-def log_multivariate_normal_pdf(x, mu, Sigma):
-    size = len(x)
-    if size == len(mu) and (size, size) == shape(Sigma):
-      det = linalg.det(Sigma)
-      if det == 0:
-        raise NameError("The covariance matrix can't be singular")
-
-      try:
-        log_norm_const = -0.5 * (float(size) * log(2*np.pi) + log(det))
-      except FloatingPointError:
-        log_norm_const = -Inf
-
-      x_mu = x - mu
-      inv = linalg.pinv(Sigma)
-      log_result = -0.5 * dot(x_mu, dot(inv, x_mu.T))
-      return log_norm_const + log_result
-    else:
-      raise NameError("The dimensions of the input don't match")
-
-def old_log_multivariate_normal_pdf(x,mu,Sigma, min_covar=1.e-7):
-  """
-  Inputs:
-    x: value vector
-    mu: mean vector
-    Sigma: covariance matrix
-  Outputs:
-    log_prob: log probability density
-  """
-  dim = x.shape[0]
-  # Hack for debugging. FIX ME!
-  if dim == 1:
-    return stats.norm.logpdf(x,loc=mu,scale=Sigma)
-  try:
-    Sigma_chol = linalg.cholesky(Sigma, lower=True)
-  except linalg.LinAlgError:
-    Sigma_chol = linalg.cholesky(Sigma + min_covar * eye(dim), lower=True)
-  Sigma_log_det = 2 * sum(log(diagonal(Sigma_chol)))
-  Sigma_sol = linalg.solve_triangular(Sigma_chol, (x - mu), lower=True)
-  log_prob = - .5 * (sum(Sigma_sol ** 2) + dim * log(2*np.pi) + \
-                      Sigma_log_det)
-  return log_prob
 
 def Filter(x, V, y, A, b, Q, C, R):
   """
@@ -969,23 +807,6 @@ def Collapse(mu_Xs, V_Xs, Ps):
   Outputs:
   """
   return CollapseCross(mu_Xs, mu_Xs, V_Xs, Ps)
-
-def logsumexp(x, dim=-1):
-    """Compute log(sum(exp(x))) in a numerically stable way.
-
-       Use second argument to specify along which dimensions the logsumexp
-       shall be computed. If -1 (which is the default), logsumexp is
-       computed along the last dimension.
-    """
-    if len(x.shape) < 2:
-        xmax = x.max()
-        return xmax + log(sum(exp(x-xmax)))
-    else:
-        if dim != -1:
-            x = x.transpose(range(dim) + range(dim+1, len(x.shape)) + [dim])
-        lastdim = len(x.shape)-1
-        xmax = x.max(lastdim)
-        return xmax + log(sum(exp(x-xmax[...,newaxis]),lastdim))
 
 def iter_vars(A, Q,N):
   V = eye(shape(A)[0])
