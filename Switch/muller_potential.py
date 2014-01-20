@@ -26,8 +26,8 @@ mass = 1.0 * dalton
 temperature = 2000 * kelvin
 friction = 100 / picosecond
 timestep = 10.0 * femtosecond
-T = 100
-sim_T = 5000
+T = 10
+sim_T = T
 
 x_dim = 2
 y_dim = 2
@@ -38,11 +38,9 @@ em_vars = ['As', 'bs', 'Qs', 'Z', 'pi']
 As = zeros((K, x_dim, x_dim))
 Sigmas = zeros((K, x_dim, x_dim))
 Cs = zeros((K, y_dim, x_dim))
-Qs = zeros((K, x_dim, x_dim))
 Rs = zeros((K, y_dim, y_dim))
 for k in range(K):
   Cs[k] = reshape(eye(x_dim), (y_dim, x_dim))
-  Qs[k] = reshape(0.01 * eye(x_dim), (x_dim, x_dim))
   Rs[k] = reshape(0.01 * eye(y_dim), (y_dim, y_dim))
   Sigmas[k] = reshape(0.00001 * eye(x_dim), (x_dim, x_dim))
 
@@ -93,8 +91,7 @@ pp.scatter(ys[:,0], ys[:,1], edgecolor='none', facecolor='k',zorder=1)
 if LEARN:
   # Learn the Switching Filter
   bs = means
-  l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Qs=Qs,
-      Rs=Rs)
+  l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Rs=Rs)
   l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss,sim_ys = l.sample(sim_T,s_init=0, x_init=means[0], y_init=means[0])
 

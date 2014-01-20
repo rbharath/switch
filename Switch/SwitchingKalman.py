@@ -60,8 +60,7 @@ class SwitchingKalmanFilter(object):
         A = randn(x_dim, x_dim)
         # Stabilize A
         u,s,v = svd(A)
-        s = minimum(s,1.0)
-        self.As[i] = dot(u, dot(diag(s), v))
+        self.As[i] = dot(u, v.T)
     if bs != None and shape(bs) == (K, x_dim):
       self.bs = copy(bs)
     else:
@@ -422,8 +421,6 @@ class SwitchingKalmanFilter(object):
     Outputs:
       None (all updates are made to internal states)
     """
-    if em_vars == 'all':
-      em_vars = ['As', 'Qs', 'mus', 'Sigmas', 'Zs', 'pi', 'Cs', 'Rs']
     (T,_) = shape(ys)
     K, x_dim, y_dim = self.K, self.x_dim, self.y_dim
 
@@ -478,11 +475,11 @@ class SwitchingKalmanFilter(object):
       P_cur[t] = outer(x_tT[t], x_tT[t])
     # Update Cs
     if 'Cs' in em_vars:
-      self.C_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT,
+      self.C_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
           ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update Rs
     if 'Rs' in em_vars:
-      self.R_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT,
+      self.R_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
           ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update As
     if 'As' in em_vars:
@@ -497,11 +494,12 @@ class SwitchingKalmanFilter(object):
       self.Q_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars, itr)
     # Update mus
     if 'mus' in em_vars:
-      self.mu_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars, itr)
+      self.mu_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+        P_cur_prev, P_cur, itr)
     # Update Sigmas
     if 'Sigmas' in em_vars:
       self.sigma_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
-          ys, alpha, covars, itr)
+          ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update Z
     if 'Z' in em_vars:
       self.z_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
@@ -513,6 +511,7 @@ class SwitchingKalmanFilter(object):
 
   def C_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
+    K, x_dim, y_dim = self.K, self.x_dim, self.y_dim
     for i in range(K):
       Cnum = zeros((y_dim, x_dim))
       Cdenom = zeros((x_dim, x_dim))
@@ -524,7 +523,8 @@ class SwitchingKalmanFilter(object):
 
   def R_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
-    for i in range(self.K):
+    K, y_dim, x_dim = self.K, self.y_dim, self.x_dim
+    for i in range(K):
       Rdenom = alpha
       if x_dim == y_dim:
         Lambda = alpha * eye(x_dim)
@@ -582,6 +582,7 @@ class SwitchingKalmanFilter(object):
 
   def z_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
+    print "Z_UPDATE!"
     K = self.K
     Z = zeros((K,K))
     for i in range(K):
@@ -603,15 +604,10 @@ class SwitchingKalmanFilter(object):
 
   def A_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
-    N_steps = 1
-    Aolds = self.As
-    (_,_,_,_,_,_,_,_,log_ll_curs) = self.filter(ys)
-    log_ll_cur = log_ll_curs[T-1]
+    N_steps = 10
     for step in range(N_steps):
-      eta = 1.0 * (1.0/(itr*N_steps + step+1))
+      eta = (2.0/(itr*N_steps + step+2))
       for i in range(self.K):
-        D = covars[i]
-        Q = self.Qs[i]
         A = self.As[i]
         Anum = zeros((x_dim, x_dim))
         Adenom = zeros((x_dim, x_dim))
@@ -621,23 +617,11 @@ class SwitchingKalmanFilter(object):
           Adenom += W_i_T[t,i] * P_cur[t-1]
         Agrad = -dot(inv(self.Qs[i]), Anum) +\
             dot(inv(self.Qs[i]), dot(self.As[i], Adenom))
-        Agrad += 20 * (dot(D, dot(A.T, dot(A, dot(D.T, A.T)))) +
-            dot(A, dot(D.T, dot(A.T, dot(A, D)))) +
-            dot(A, dot(D.T, dot(A.T, dot(A, D)))) +
-            dot(A, dot(D, dot(A.T, dot(A, D.T)))) +
-            2 * (dot((Q-D).T, dot(A, D.T)) +
-                 dot(Q-D, dot(A, D))))
-        #A = dot(Anum, linalg.pinv(Adenom))
-        A = self.As[i] + eta * Agrad
         # Stabilize A
-        u,s,v = svd(A)
-        s = maximum(minimum(s,1.0), -1.0)
-        self.As[i] = dot(u, dot(diag(s), v))
-    (_,_,_,_,_,_,_,_,log_ll_news) = self.filter(ys)
-    log_ll_new = log_ll_news[T-1]
-    # Primitive version of line search
-    if log_ll_new < log_ll_cur:
-      self.As = Aolds
+        u,s,v = svd(Agrad)
+        Agrad = dot(u, v.T)
+        self.As[i] = self.As[i] + eta * (Agrad - self.As[i])
+        #self.As[i] = dot(u, dot(diag(s), v))
 
   def Q_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha,
           covars, itr):
