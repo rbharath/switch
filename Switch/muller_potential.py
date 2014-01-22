@@ -26,7 +26,7 @@ mass = 1.0 * dalton
 temperature = 2000 * kelvin
 friction = 100 / picosecond
 timestep = 10.0 * femtosecond
-T = 10
+T = 100
 sim_T = T
 
 x_dim = 2
@@ -34,7 +34,7 @@ y_dim = 2
 K = 3
 NUM_ITERS = 3
 
-em_vars = ['As', 'bs', 'Qs', 'Z', 'pi']
+em_vars = ['As', 'bs', 'Qs']
 As = zeros((K, x_dim, x_dim))
 Sigmas = zeros((K, x_dim, x_dim))
 Cs = zeros((K, y_dim, x_dim))
@@ -83,10 +83,11 @@ for traj in range(NUM_TRAJS):
     integrator.step(10)
   if PLOT:
     pp.plot(trajectory[start:,0], trajectory[start:,1], color='k')
-# Compute K-means
-means, assignments = kmeans(ys, K)
-pp.scatter(means[:,0], means[:,1], color='r',zorder=10)
-pp.scatter(ys[:,0], ys[:,1], edgecolor='none', facecolor='k',zorder=1)
+    # Compute K-means
+    means, assignments = kmeans(ys, K)
+    pp.scatter(means[:,0], means[:,1], color='r',zorder=10)
+    pp.scatter(ys[:,0], ys[:,1], edgecolor='none', facecolor='k',zorder=1)
+    pp.show()
 
 if LEARN:
   # Learn the Switching Filter
@@ -95,6 +96,7 @@ if LEARN:
   l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss,sim_ys = l.sample(sim_T,s_init=0, x_init=means[0], y_init=means[0])
 
-  if PLOT:
-    MullerForce.plot(ax=pp.gca())
+if PLOT:
+  MullerForce.plot(ax=pp.gca())
+  if LEARN:
     pp.scatter(sim_ys[:,0], sim_ys[:,1], edgecolor='none', facecolor='g')

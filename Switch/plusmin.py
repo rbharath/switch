@@ -2,6 +2,7 @@ from SwitchingKalman import *
 from numpy import array, reshape, savetxt, loadtxt
 import matplotlib.pyplot as plt
 from numpy.random import rand
+from numpy.linalg import svd
 import sys
 
 """The switching system has the following one-dimensional dynamics:
@@ -18,11 +19,8 @@ PLOT = True
 #LEARN = False
 #PLOT = True
 
-NUM_SCHED = 1
-NUM_ITERS = 10
-OBSERVABLE = False
-MAX_NUM_RESTARTS= 2000
-T = 300
+NUM_ITERS = 5
+T = 500
 x_dim = 1
 y_dim = 1
 K = 2
@@ -30,13 +28,13 @@ As = reshape(array([[0.5],[0.5]]), (K,x_dim,x_dim))
 bs = reshape(array([[0.5],[-0.5]]), (K,x_dim))
 Qs = reshape(array([[0.01],[0.01]]), (K,x_dim,x_dim))
 Cs = reshape(array([[1],[1]]), (K,y_dim,x_dim))
-Rs = reshape(array([[0.1],[0.1]]), (K,y_dim,y_dim))
+Rs = reshape(array([[0.01],[0.01]]), (K,y_dim,y_dim))
 Z = reshape(array([[0.98, 0.02],[0.02, 0.98]]), (K,K))
 pi = reshape(array([0.99,0.01]), (K,))
 mus = reshape(array([[1],[-1]]), (K,x_dim))
 Sigmas = reshape(array([[0.01],[0.01]]), (K,x_dim,x_dim))
 #em_vars = ['As','Qs', 'bs', 'pi', 'Z', 'mus', 'Sigmas', 'Cs', 'Rs']
-em_vars = ['Qs']
+em_vars = ['As', 'bs', 'Qs', 'pi', 'Z', 'Cs']
 s = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Cs=Cs,Rs=Rs,Z=Z, pi=pi,Sigmas=Sigmas, mus=mus)
 if SAMPLE:
   xs,Ss,ys = s.sample(T)
@@ -57,9 +55,15 @@ print "True Log-LL = %s" % str(true_log_ll)
 if LEARN:
   # Compute K-means
   means, assignments = kmeans(ys, K)
-  bs = means
+  for i in range(K):
+    A = randn(x_dim, x_dim)
+    u, s, v = svd(A)
+    As[i] = rand() * dot(u, v.T)
+    bs[i] = dot(eye(x_dim) - As[i], means[i])
   l = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Cs=Cs,Rs=Rs,Z=Z, pi=pi,Sigmas=Sigmas, mus=mus)
-  l.em(ys, em_iters=NUM_ITERS, em_vars=em_vars)
+  W_i_Ts = l.em(ys, em_iters=NUM_ITERS, em_vars=em_vars)
+  l1 = W_i_Ts[NUM_ITERS-1,:,0]
+  l2 = W_i_Ts[NUM_ITERS-1,:,1]
   sim_xs,sim_Ss,sim_ys = l.sample(T,s_init=0, x_init=means[0],
       y_init=means[0])
 print "True Log-LL = %s" % str(true_log_ll)
@@ -69,6 +73,6 @@ if PLOT:
   plt.plot(range(T), xs, label='Hidden State')
   plt.plot(range(T), ys, label="Observations")
   if LEARN:
-    plt.plot(range(T), sim_xs, label='Sampled Hidden State')
+    plt.plot(range(T), sim_xs, label='Sampled Observations')
   plt.legend()
   plt.show()

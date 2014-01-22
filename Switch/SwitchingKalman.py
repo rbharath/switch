@@ -425,8 +425,10 @@ class SwitchingKalmanFilter(object):
     K, x_dim, y_dim = self.K, self.x_dim, self.y_dim
 
     # regularization
-    alpha = 0.1 * T
+    alpha = 0.1
     itr = 0
+    W_i_Ts = zeros((em_iters, T, K))
+    base_means = None
     while itr < em_iters:
       print "\tEM Iteration = %d" % itr
       (_, logM_tts, _, x_j_tts, x_tts,
@@ -440,12 +442,28 @@ class SwitchingKalmanFilter(object):
       # Now perform inference
       (_, S_j_t_x_1Ts, S_jk_tt_1_x_1Ts) = \
           self.inference(x_tTs)
+      if itr < em_iters :
+        means, assignments = kmeans(x_tTs, K)
+        if itr > 0:
+          _, assignments = means_match(base_means, means, assignments)
+        else:
+          base_means = means
+        S_j_t_x_1Ts = zeros((T,K))
+        for t in range(T):
+          ind = assignments[t]
+          for k in range(K):
+            if k != ind:
+              S_j_t_x_1Ts[t,k] = 0.0
+            else:
+              S_j_t_x_1Ts[t,ind] = 1.0
       self.em_update(S_j_t_x_1Ts, S_jk_tt_1_x_1Ts,
           x_tTs, ys, alpha, itr, em_vars)
+      W_i_Ts[itr] = S_j_t_x_1Ts
       itr += 1
+    return W_i_Ts
 
   def em_update(self, W_i_T, M_tt_1T, x_tT, ys, alpha, itr,
-      em_vars='all', beta=1.0):
+      em_vars='all'):
     """
     TODO: Add support for C and R learning
     Inputs:
@@ -459,7 +477,6 @@ class SwitchingKalmanFilter(object):
       x_tTs: The sequence satisfies
         x_tT = E[X_t|y_{1:T}] (T, x_dim)
       em_vars: Variables to perform learning on
-      beta: annealing parameter
     Outputs:
       None (all updates are made to internal state)
     """
@@ -468,7 +485,6 @@ class SwitchingKalmanFilter(object):
     P_cur_prev = zeros((T,x_dim,x_dim))
     P_cur = zeros((T, x_dim, x_dim))
     means, covars = empirical_wells(ys, W_i_T)
-    W_i_T = W_i_T ** beta
     for t in range(T):
       if t > 0:
         P_cur_prev[t] = outer(x_tT[t], x_tT[t-1])
@@ -487,11 +503,11 @@ class SwitchingKalmanFilter(object):
             P_cur_prev, P_cur, itr)
     # Update bs
     if 'bs' in em_vars:
-      self.b_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
-            P_cur_prev, P_cur, itr)
+      self.b_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, means,
+          covars, P_cur_prev, P_cur, itr)
     # Update Qs
     if 'Qs' in em_vars:
-      self.Q_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars, itr)
+      self.Q_update(T, x_dim, W_i_T, x_tT, alpha, itr)
     # Update mus
     if 'mus' in em_vars:
       self.mu_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
@@ -537,16 +553,17 @@ class SwitchingKalmanFilter(object):
       Rnum = Lambda + R1 + dot(self.Cs[i], R2)
       self.Rs[i] = (1/Rdenom) * Rnum
 
-  def b_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
-        P_cur_prev, P_cur, itr):
+  def b_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha,
+      means, covars, P_cur_prev, P_cur, itr):
     K, x_dim = self.K, self.x_dim
     for i in range(K):
-      bnum = zeros((x_dim))
-      bdenom = 0
-      for t in range(1,T):
-        bnum += W_i_T[t,i] * (x_tT[t] - dot(self.As[i], x_tT[t-1]))
-        bdenom += W_i_T[t,i]
-      self.bs[i] = (1/bdenom) * bnum
+      #bnum = zeros((x_dim))
+      #bdenom = 0
+      #for t in range(1,T):
+      #  bnum += W_i_T[t,i] * (x_tT[t] - dot(self.As[i], x_tT[t-1]))
+      #  bdenom += W_i_T[t,i]
+      #self.bs[i] = (1/bdenom) * bnum
+      self.bs[i] = dot(eye(x_dim) - self.As[i], means[i])
 
   def mu_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
@@ -582,7 +599,6 @@ class SwitchingKalmanFilter(object):
 
   def z_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
-    print "Z_UPDATE!"
     K = self.K
     Z = zeros((K,K))
     for i in range(K):
@@ -599,48 +615,40 @@ class SwitchingKalmanFilter(object):
     K = self.K
     for i in range(K):
       self.pi[i] += W_i_T[0,i]
-      self.pi[i] /= K
+      self.pi[i] /= double(K)
     self.pi = self.pi/(sum(self.pi))
 
   def A_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
-    N_steps = 10
-    for step in range(N_steps):
-      eta = (2.0/(itr*N_steps + step+2))
-      for i in range(self.K):
-        A = self.As[i]
-        Anum = zeros((x_dim, x_dim))
-        Adenom = zeros((x_dim, x_dim))
-        for t in range(1,T):
-          term = (P_cur_prev[t] - outer(self.bs[i], x_tT[t-1]))
-          Anum += W_i_T[t,i] * term
-          Adenom += W_i_T[t,i] * P_cur[t-1]
-        Agrad = -dot(inv(self.Qs[i]), Anum) +\
-            dot(inv(self.Qs[i]), dot(self.As[i], Adenom))
-        # Stabilize A
-        u,s,v = svd(Agrad)
-        Agrad = dot(u, v.T)
-        self.As[i] = self.As[i] + eta * (Agrad - self.As[i])
-        #self.As[i] = dot(u, dot(diag(s), v))
+    #N_steps = 10
+    #for step in range(N_steps):
+    #  eta = (2.0/(itr*N_steps + step+2))
+    for i in range(self.K):
+      #A = self.As[i]
+      #Q = self.Qs[i]
+      #b = self.bs[i]
+      Anum = zeros((x_dim, x_dim))
+      Adenom = zeros((x_dim, x_dim))
+      #Agrad = zeros((x_dim, x_dim))
+      for t in range(1,T):
+        Anum += W_i_T[t,i] * P_cur_prev[t]
+        Adenom += W_i_T[t,i] * P_cur[t-1]
+        #x_t = x_tT[t]
+        #x_t_pred = dot(self.As[i], x_tT[t-1]) + self.bs[i]
+        #diff = x_t - x_t_pred
+        #Agrad += W_i_T[t,i] * outer(diff, x_tT[t-1])
+      self.As[i] = dot(Anum, linalg.pinv(Adenom))
+      #Agrad = - dot(inv(Q), Agrad)
+      #u,s,v = svd(Agrad)
+      #Agrad = dot(u, v.T)
+      #self.As[i] = A + eta * (Agrad - A)
 
-  def Q_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha,
-          covars, itr):
+  def Q_update(self, T, x_dim, W_i_T, x_tT, alpha, itr):
     N_steps = 1
-    Qolds = self.Qs
-    try:
-      (_,_,_,_,_,_,_,_,log_ll_curs) = self.filter(ys)
-      log_ll_cur = log_ll_curs[T-1]
-    except FloatingPointError:
-      log_ll_cur = -Inf
     for step in range(N_steps):
-      eta = 1.0 * (1.0/(itr*N_steps + step+1))
+      eta = 2.0/(itr*N_steps + step+2)
       Lambda = alpha * eye(x_dim)
       for i in range(self.K):
-        D = covars[i]
-        A = self.As[i]
-        Qforced = D - dot(A, dot(D, A.T))
-        #self.Qs[i] = Qforced
-        #continue
         Qdenom = alpha
         Qnum = Lambda
         Anum = zeros((x_dim, x_dim))
@@ -652,23 +660,8 @@ class SwitchingKalmanFilter(object):
           Qnum += W_i_T[t,i] * outer(diff, diff)
           Qdenom += W_i_T[t,i]
         Qgrad = -0.5 * Qnum + 0.5 * Qdenom * self.Qs[i]
-        Q = self.Qs[i]
-        Qgrad += 20 * (- 2 * dot(Q.T, dot(Q, Q.T)) \
-            - 2 * dot(Q.T, dot(dot(A,dot(D,A.T))-D,Q.T)))
-        inv_update = inv(self.Qs[i]) + eta * Qgrad
-        #try:
-        self.Qs[i] = linalg.pinv(inv_update)
-        #except FloatingPointError:
-        #  #self.Qs[i] = Qolds[i]
-        #  self.Qs[i] = (1.0/Qdenom) * Qnum
-    try:
-      (_,_,_,_,_,_,_,_,log_ll_news) = self.filter(ys)
-      log_ll_new = log_ll_news[T-1]
-    except FloatingPointError:
-      log_ll_new = -Inf
-    # Primitive version of line search
-    if log_ll_new < log_ll_cur:
-      self.Qs = Qolds
+        Qpred = (1.0/Qdenom) * Qnum
+        self.Qs[i] = Qpred
 
   def compute_metastable_wells(self):
     """Compute the metastable wells according to the formula
