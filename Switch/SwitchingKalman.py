@@ -2,7 +2,7 @@ import numpy as np
 from numpy import dot, shape, eye, outer, sqrt, sum, log, diagonal, zeros
 from numpy import nonzero, exp, shape, reshape, diag, maximum, isnan
 from numpy import copy, minimum, ones, newaxis, mod, Inf
-from numpy.linalg import svd, inv
+from numpy.linalg import svd, inv, eig
 from numpy.random import randint, randn, multinomial, multivariate_normal
 from numpy.random import rand
 from Kmeans import *
@@ -389,13 +389,13 @@ class SwitchingKalmanFilter(object):
       S_j_t_x_1t[t] /= c
     # Compute the one-step look-ahead matrix
     for t in range(T-1):
-      # We shouldn't need a normalization step afterwards, but should
-      # check anyways to be sure
       for k in range(K):
         s = 0
         for j in range(K):
           s += S_j_t_x_1t[t,j] * self.Z[j,k]
         S_k_t_1_x_1t[t,k] = s
+      c = sum(S_k_t_1_x_1t[t])
+      S_k_t_1_x_1t[t] /= c
     # Initialize the backwards pass
     S_j_t_x_1T[T-1] = S_j_t_x_1t[T-1]
     # backward pass
@@ -406,6 +406,8 @@ class SwitchingKalmanFilter(object):
           const_k = S_j_t_x_1t[t,j] * self.Z[j,k] / (S_k_t_1_x_1t[t,k])
           s += const_k * S_j_t_x_1T[t+1,k]
         S_j_t_x_1T[t,j] = s
+      c = sum(S_j_t_x_1T[t])
+      S_j_t_x_1T[t] /= c
     # joint pass
     for t in range(T-1):
       for j in range(K):
@@ -429,6 +431,7 @@ class SwitchingKalmanFilter(object):
     itr = 0
     W_i_Ts = zeros((em_iters, T, K))
     base_means = None
+    means, assignments = kmeans(ys, K)
     while itr < em_iters:
       print "\tEM Iteration = %d" % itr
       (_, logM_tts, _, x_j_tts, x_tts,
@@ -442,25 +445,16 @@ class SwitchingKalmanFilter(object):
       # Now perform inference
       (_, S_j_t_x_1Ts, S_jk_tt_1_x_1Ts) = \
           self.inference(x_tTs)
-      if itr < em_iters :
+      if itr < em_iters:
         means, assignments = kmeans(x_tTs, K)
-        if itr > 0:
-          _, assignments = means_match(base_means, means, assignments)
-        else:
-          base_means = means
-        S_j_t_x_1Ts = zeros((T,K))
-        for t in range(T):
-          ind = assignments[t]
-          for k in range(K):
-            if k != ind:
-              S_j_t_x_1Ts[t,k] = 0.0
-            else:
-              S_j_t_x_1Ts[t,ind] = 1.0
+        S_j_t_x_1Ts = assignment_to_weights(assignments, K)
+        Zhat = transition_counts(assignments, K)
+        S_jk_tt_1_x_1Ts = tile(Zhat, (T,1,1))
       self.em_update(S_j_t_x_1Ts, S_jk_tt_1_x_1Ts,
           x_tTs, ys, alpha, itr, em_vars)
       W_i_Ts[itr] = S_j_t_x_1Ts
       itr += 1
-    return W_i_Ts
+    return S_jk_tt_1_x_1Ts
 
   def em_update(self, W_i_T, M_tt_1T, x_tT, ys, alpha, itr,
       em_vars='all'):
@@ -507,7 +501,7 @@ class SwitchingKalmanFilter(object):
           covars, P_cur_prev, P_cur, itr)
     # Update Qs
     if 'Qs' in em_vars:
-      self.Q_update(T, x_dim, W_i_T, x_tT, alpha, itr)
+      self.Q_update(T, x_dim, W_i_T, x_tT, alpha, itr, covars)
     # Update mus
     if 'mus' in em_vars:
       self.mu_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
@@ -518,7 +512,7 @@ class SwitchingKalmanFilter(object):
           ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update Z
     if 'Z' in em_vars:
-      self.z_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
+      self.Z_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
           ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update pis
     if 'pi' in em_vars:
@@ -597,7 +591,7 @@ class SwitchingKalmanFilter(object):
       if min(linalg.eig(prop_sigma)[0]) > 0:
         self.Sigmas[i] = prop_sigma
 
-  def z_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+  def Z_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
     K = self.K
     Z = zeros((K,K))
@@ -608,7 +602,10 @@ class SwitchingKalmanFilter(object):
           Z[i,j] += M_tt_1T[t-1,i,j]
           Z_denom += W_i_T[t,i]
         Z[i,j] /= Z_denom
-    self.Z = (Z.T / (sum(Z,axis=1))).T
+    for i in range(K):
+      s = sum(Z[i,:])
+      Z[i,:] /= s
+    self.Z = Z
 
   def pi_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
@@ -620,31 +617,21 @@ class SwitchingKalmanFilter(object):
 
   def A_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
-    #N_steps = 10
-    #for step in range(N_steps):
-    #  eta = (2.0/(itr*N_steps + step+2))
     for i in range(self.K):
-      #A = self.As[i]
-      #Q = self.Qs[i]
-      #b = self.bs[i]
       Anum = zeros((x_dim, x_dim))
       Adenom = zeros((x_dim, x_dim))
-      #Agrad = zeros((x_dim, x_dim))
       for t in range(1,T):
         Anum += W_i_T[t,i] * P_cur_prev[t]
         Adenom += W_i_T[t,i] * P_cur[t-1]
-        #x_t = x_tT[t]
-        #x_t_pred = dot(self.As[i], x_tT[t-1]) + self.bs[i]
-        #diff = x_t - x_t_pred
-        #Agrad += W_i_T[t,i] * outer(diff, x_tT[t-1])
       self.As[i] = dot(Anum, linalg.pinv(Adenom))
-      #Agrad = - dot(inv(Q), Agrad)
-      #u,s,v = svd(Agrad)
-      #Agrad = dot(u, v.T)
-      #self.As[i] = A + eta * (Agrad - A)
+      u,s,v = svd(self.As[i])
+      s = maximum(minimum(s,ones(shape(s))), -1.0 * ones(shape(s)))
+      self.As[i] = dot(u,dot(diag(s), v))
 
-  def Q_update(self, T, x_dim, W_i_T, x_tT, alpha, itr):
+  def Q_update(self, T, x_dim, W_i_T, x_tT, alpha, itr, covars):
     N_steps = 1
+    self.Qs = covars
+    return
     for step in range(N_steps):
       eta = 2.0/(itr*N_steps + step+2)
       Lambda = alpha * eye(x_dim)
@@ -673,6 +660,24 @@ class SwitchingKalmanFilter(object):
     for i in range(K):
       wells[i] = dot(inv(eye(x_dim) - self.As[i]), self.bs[i])
     return wells
+
+  def compute_process_covariances(self):
+    K, x_dim = self.K, self.x_dim
+    covs = zeros((K,x_dim, x_dim))
+    N = 10000
+    for k in range(K):
+      A = self.As[k]
+      Q = self.Qs[k]
+      V = iter_vars(A,Q,N)
+      covs[k] = V
+    return covs
+
+  def compute_eigenspectra(self):
+    K, x_dim = self.K, self.x_dim
+    eigenspectra = zeros((K, x_dim,x_dim))
+    for k in range(K):
+      eigenspectra[k] = diag(eig(self.As[k])[0])
+    return eigenspectra
 
 def Filter(x, V, y, A, b, Q, C, R):
   """
@@ -791,6 +796,18 @@ def iter_vars(A, Q,N):
     V = Q + dot(A,dot(V, A.T))
   return V
 
+def assignment_to_weights(assignments,K):
+  (T,) = shape(assignments)
+  W_i_Ts = zeros((T,K))
+  for t in range(T):
+    ind = assignments[t]
+    for k in range(K):
+      if k != ind:
+        W_i_Ts[t,k] = 0.0
+      else:
+        W_i_Ts[t,ind] = 1.0
+  return W_i_Ts
+
 def empirical_wells(Ys, W_i_Ts):
   (T, y_dim) = shape(Ys)
   (_, K) = shape(W_i_Ts)
@@ -811,3 +828,15 @@ def empirical_wells(Ys, W_i_Ts):
       denom += W_i_Ts[t,k]
     covars[k] = (1.0/denom) * num
   return means, covars
+
+def transition_counts(assignments, K):
+  (T,) = shape(assignments)
+  Zhat = ones((K, K))
+  for t in range(1,T):
+    i = assignments[t-1]
+    j = assignments[t]
+    Zhat[i,j] += 1
+  for i in range(K):
+    s = sum(Zhat[i])
+    Zhat[i] /= s
+  return Zhat

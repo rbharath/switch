@@ -26,15 +26,15 @@ mass = 1.0 * dalton
 temperature = 2000 * kelvin
 friction = 100 / picosecond
 timestep = 10.0 * femtosecond
-T = 100
-sim_T = T
+T = 300
+sim_T = 1000
 
 x_dim = 2
 y_dim = 2
 K = 3
 NUM_ITERS = 3
 
-em_vars = ['As', 'bs', 'Qs']
+em_vars = ['As', 'bs', 'Qs', 'Z']
 As = zeros((K, x_dim, x_dim))
 Sigmas = zeros((K, x_dim, x_dim))
 Cs = zeros((K, y_dim, x_dim))
@@ -93,10 +93,20 @@ if LEARN:
   # Learn the Switching Filter
   bs = means
   l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Rs=Rs)
-  l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
+  S_jk_tt_1_x_1Ts = l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss,sim_ys = l.sample(sim_T,s_init=0, x_init=means[0], y_init=means[0])
 
 if PLOT:
-  MullerForce.plot(ax=pp.gca())
+  Delta = 0.5
+  minx = min(ys[:,0])
+  maxx = max(ys[:,0])
+  miny = min(ys[:,1])
+  maxy = max(ys[:,1])
   if LEARN:
-    pp.scatter(sim_ys[:,0], sim_ys[:,1], edgecolor='none', facecolor='g')
+    minx = min(min(sim_ys[:,0]), minx) - Delta
+    maxx = max(max(sim_ys[:,0]), maxx) + Delta
+    miny = min(min(sim_xs[:,1]), miny) - Delta
+    maxy = max(max(sim_xs[:,1]), maxy) + Delta
+    pp.scatter(sim_ys[:,0], sim_ys[:,1], edgecolor='none',
+        zorder=5,facecolor='g')
+  MullerForce.plot(ax=pp.gca(),minx=minx,maxx=maxx,miny=miny,maxy=maxy)

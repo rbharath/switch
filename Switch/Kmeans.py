@@ -66,9 +66,9 @@ def means_match(base_means, means, assignments):
     for j in range(K):
       if norm(base_means[i] - means[j]) < closest_dist:
         closest = j
-        print "base_means[%d] = %s" % (i, str(base_means[i]))
-        print "means[%d] = %s" % (j, str(means[j]))
-        closest_dist = norm(base_means[i], means[j])
+        #print "base_means[%d] = %s" % (i, str(base_means[i]))
+        #print "means[%d] = %s" % (j, str(means[j]))
+        closest_dist = norm(base_means[i]- means[j])
     matching[i] = closest
   for t in range(T):
     new_assignments[t] = matching[assignments[t]]

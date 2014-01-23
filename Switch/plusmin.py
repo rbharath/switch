@@ -34,7 +34,7 @@ pi = reshape(array([0.99,0.01]), (K,))
 mus = reshape(array([[1],[-1]]), (K,x_dim))
 Sigmas = reshape(array([[0.01],[0.01]]), (K,x_dim,x_dim))
 #em_vars = ['As','Qs', 'bs', 'pi', 'Z', 'mus', 'Sigmas', 'Cs', 'Rs']
-em_vars = ['As', 'bs', 'Qs', 'pi', 'Z', 'Cs']
+em_vars = ['As', 'bs', 'Qs']
 s = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Cs=Cs,Rs=Rs,Z=Z, pi=pi,Sigmas=Sigmas, mus=mus)
 if SAMPLE:
   xs,Ss,ys = s.sample(T)
@@ -55,15 +55,15 @@ print "True Log-LL = %s" % str(true_log_ll)
 if LEARN:
   # Compute K-means
   means, assignments = kmeans(ys, K)
+  W_i_Ts = assignment_to_weights(assignments,K)
+  emp_means, emp_covars = empirical_wells(ys, W_i_Ts)
   for i in range(K):
     A = randn(x_dim, x_dim)
     u, s, v = svd(A)
     As[i] = rand() * dot(u, v.T)
     bs[i] = dot(eye(x_dim) - As[i], means[i])
   l = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Cs=Cs,Rs=Rs,Z=Z, pi=pi,Sigmas=Sigmas, mus=mus)
-  W_i_Ts = l.em(ys, em_iters=NUM_ITERS, em_vars=em_vars)
-  l1 = W_i_Ts[NUM_ITERS-1,:,0]
-  l2 = W_i_Ts[NUM_ITERS-1,:,1]
+  l.em(ys, em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss,sim_ys = l.sample(T,s_init=0, x_init=means[0],
       y_init=means[0])
 print "True Log-LL = %s" % str(true_log_ll)
