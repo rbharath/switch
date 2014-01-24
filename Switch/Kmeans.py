@@ -26,7 +26,6 @@ def kmeans(ys, K):
   Epsilon = 1e-5
   iteration = 0
   while Delta >= Epsilon:
-    #print "\tK-means iteration = %d" % iteration
     Delta = 0
     # Perform an Assignment Step
     for t in range(T):
@@ -37,7 +36,6 @@ def kmeans(ys, K):
         if norm(y - means[k]) < dist:
           dist = norm(y - means[k])
           assignments[t] = k
-    #print "means[%d] = %s" % (iteration, str(means))
     # Perform Mean Update Step
     old_means[:] = means[:]
     # Reset means and num_each
@@ -47,9 +45,9 @@ def kmeans(ys, K):
       k = assignments[t]
       num_each[k] += 1
       means[k] += ys[t]
-    #print "num_each[%d] = %s" % (iteration, str(num_each))
     for k in range(K):
-      means[k] /= num_each[k]
+      if num_each[k] > 0:
+        means[k] /= num_each[k]
       Delta += norm(means[k] - old_means[k])
     # reset numeach
     iteration += 1

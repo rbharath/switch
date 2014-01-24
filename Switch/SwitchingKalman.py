@@ -442,9 +442,9 @@ class SwitchingKalmanFilter(object):
       (x_j_tTs, _, _, logM_tt_1Ts, _, _, x_tTs, _) = \
           self.smooth(x_j_tts, V_j_tts,
               V_ij_tt_1s, logM_tts, ys)
-      # Now perform inference
-      (_, S_j_t_x_1Ts, S_jk_tt_1_x_1Ts) = \
-          self.inference(x_tTs)
+      ## Now perform inference
+      #(_, S_j_t_x_1Ts, S_jk_tt_1_x_1Ts) = \
+      #    self.inference(x_tTs)
       if itr < em_iters:
         means, assignments = kmeans(x_tTs, K)
         S_j_t_x_1Ts = assignment_to_weights(assignments, K)
@@ -630,31 +630,32 @@ class SwitchingKalmanFilter(object):
       self.As[i] = eta * dot(u,dot(diag(s), v))
 
   def Q_update(self, T, x_dim, W_i_T, x_tT, alpha, itr, covars):
-    #self.Qs = covars
-    K = self.K
-    eta = 0.1
-    for k in range(K):
-      A = eta * self.As[k]
-      D = covars[k]
-      self.Qs[k] = D - dot(A, dot(D, A.T))
-    return
-    #for step in range(N_steps):
-    #  eta = 2.0/(itr*N_steps + step+2)
-    #  Lambda = alpha * eye(x_dim)
-    #  for i in range(self.K):
-    #    Qdenom = alpha
-    #    Qnum = Lambda
-    #    Anum = zeros((x_dim, x_dim))
-    #    Adenom = zeros((x_dim, x_dim))
-    #    for t in range(1,T):
-    #      x_t = x_tT[t]
-    #      x_t_pred = dot(self.As[i], x_tT[t-1]) + self.bs[i]
-    #      diff = x_t - x_t_pred
-    #      Qnum += W_i_T[t,i] * outer(diff, diff)
-    #      Qdenom += W_i_T[t,i]
-    #    Qgrad = -0.5 * Qnum + 0.5 * Qdenom * self.Qs[i]
-    #    Qpred = (1.0/Qdenom) * Qnum
-    #    self.Qs[i] = Qpred
+    ##self.Qs = covars
+    #K = self.K
+    #eta = 0.1
+    #for k in range(K):
+    #  A = eta * self.As[k]
+    #  D = covars[k]
+    #  self.Qs[k] = D - dot(A, dot(D, A.T))
+    #return
+    N_steps = 1
+    for step in range(N_steps):
+      eta = 2.0/(itr*N_steps + step+2)
+      Lambda = alpha * eye(x_dim)
+      for i in range(self.K):
+        Qdenom = alpha
+        Qnum = Lambda
+        Anum = zeros((x_dim, x_dim))
+        Adenom = zeros((x_dim, x_dim))
+        for t in range(1,T):
+          x_t = x_tT[t]
+          x_t_pred = dot(self.As[i], x_tT[t-1]) + self.bs[i]
+          diff = x_t - x_t_pred
+          Qnum += W_i_T[t,i] * outer(diff, diff)
+          Qdenom += W_i_T[t,i]
+        Qgrad = -0.5 * Qnum + 0.5 * Qdenom * self.Qs[i]
+        Qpred = (1.0/Qdenom) * Qnum
+        self.Qs[i] = Qpred
 
   def compute_metastable_wells(self):
     """Compute the metastable wells according to the formula

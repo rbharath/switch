@@ -44,7 +44,6 @@ for k in range(K):
   Rs[k] = reshape(0.01 * eye(y_dim), (y_dim, y_dim))
   Sigmas[k] = reshape(0.00001 * eye(x_dim), (x_dim, x_dim))
 
-
 # Allocate Memory
 start = T/4
 ys = zeros((NUM_TRAJS * (T-start), y_dim))
@@ -93,7 +92,7 @@ if LEARN:
   # Learn the Switching Filter
   bs = means
   l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Rs=Rs)
-  S_jk_tt_1_x_1Ts = l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
+  l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss,sim_ys = l.sample(sim_T,s_init=0, x_init=means[0], y_init=means[0])
 
 if PLOT:
