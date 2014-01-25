@@ -20,28 +20,32 @@ def load_timeseries(filenames, atom_indices, topology):
         f.extend([file]*len(x))
     return np.concatenate(X), np.concatenate(i), np.array(f)
 
-def gen_movie(Ys, reference, filenames, out, T, N_atoms, dim):
+def gen_movie(ys, reference, filenames, out, N_atoms):
   """Assumes that we have a full featurization of the model. Should fix
      this for larger systems.
   """
   atom_indices = arange(N_atoms)
   xx, ii, ff = load_timeseries(filenames, atom_indices, reference)
   movieframes = []
-  for y in Ys:
+  for y in ys:
     i = np.argmin(np.sum((y - xx)**2, axis=1))
     movieframes.append(md.load_frame(ff[i], ii[i]))
   movie = reduce(lambda a, b: a.join(b), movieframes)
   movie.superpose(movie)
   movie.save('%s.xtc' % out)
   movie[0].save('%s.xtc.pdb' % out)
-  return movie, xx
+
+def gen_structures(ys, reference, filenames, outs, N_atoms):
+  atom_indices = arange(N_atoms)
+  xx, ii, ff = load_timeseries(filenames, atom_indices, reference)
+  for y, out in zip(ys, outs):
+    i = np.argmin(np.sum((y - xx)**2, axis=1))
+    frame = md.load_frame(ff[i], ii[i])
+    frame.superpose(reference)
+    frame.save('%s.pdb' % out)
 
 def distance_matrix(traj, native):
-  diff_traj = traj.superpose(native)
-  diff = diff_traj.xyz
-  (T, N_atoms, _) = shape(diff)
-  dist= zeros((T, N_atoms))
-  for t in range(T):
-    for atom in range(N_atoms):
-      dist[t, atom] = norm(diff[t,atom])
+  traj.superpose(native)
+  diff = (traj.xyz[:] - native.xyz[0])**2
+  dist = np.sqrt(np.sum(diff, axis=2))
   return dist

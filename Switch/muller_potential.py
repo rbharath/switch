@@ -23,16 +23,16 @@ NUM_TRAJS = 1
 nParticles = 1
 mass = 1.0 * dalton
 #temps  = 200 300 500 750 1000 1250 1500 1750 2000
-temperature = 2000 * kelvin
+temperature = 3000 * kelvin
 friction = 100 / picosecond
 timestep = 10.0 * femtosecond
-T = 300
+T = 500
 sim_T = 1000
 
 x_dim = 2
 y_dim = 2
 K = 3
-NUM_ITERS = 3
+NUM_ITERS = 5
 
 em_vars = ['As', 'bs', 'Qs', 'Z']
 As = zeros((K, x_dim, x_dim))
@@ -108,4 +108,5 @@ if PLOT:
     maxy = max(max(sim_xs[:,1]), maxy) + Delta
     pp.scatter(sim_ys[:,0], sim_ys[:,1], edgecolor='none',
         zorder=5,facecolor='g')
+    pp.plot(sim_ys[:,0], sim_ys[:,1], zorder=5,color='g')
   MullerForce.plot(ax=pp.gca(),minx=minx,maxx=maxx,miny=miny,maxy=maxy)

@@ -617,7 +617,8 @@ class SwitchingKalmanFilter(object):
 
   def A_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
-    eta = 0.5
+    #eta = 0.5
+    eta = 0.99
     for i in range(self.K):
       Anum = zeros((x_dim, x_dim))
       Adenom = zeros((x_dim, x_dim))
@@ -717,14 +718,12 @@ def Filter(x, V, y, A, b, Q, C, R):
   # Compute error
   e = y - dot(C,pred_x)
   S = dot(C, dot(pred_V, C.T)) + R
-  #K = dot(V, dot(pred_V, linalg.pinv(S))) WRONG!
   K = dot(pred_V, dot(C.T, linalg.pinv(S)))
 
   # Update the estimates
   cor_x = pred_x + dot(K, e)
   cor_V = pred_V - dot(K, dot(S, K.T))
   cor_V_joint = dot(eye(dim_state) - dot(K,C), dot(A, V))
-  #logL = log_multivariate_normal_pdf(e,zeros(shape(e)),S)
   logL = log_multivariate_normal_pdf(y - cor_x,zeros(shape(e)),cor_V)
   return (cor_x, cor_V, cor_V_joint, logL)
 

@@ -70,9 +70,9 @@ print "True Log-LL = %s" % str(true_log_ll)
 if PLOT:
   plt.close('all')
   plt.figure(1)
-  plt.plot(range(T), xs, label='Hidden State')
+  #plt.plot(range(T), xs, label='Hidden State')
   plt.plot(range(T), ys, label="Observations")
   if LEARN:
-    plt.plot(range(T), sim_xs, label='Sampled Observations')
+    plt.plot(range(T), sim_ys, label='Sampled Observations')
   plt.legend()
   plt.show()

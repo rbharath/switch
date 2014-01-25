@@ -16,17 +16,30 @@ import numpy as np
 from movies import *
 
 SIMULATE = False
+DELETE = True
+
 LOAD = True
 LEARN = True
 MOVIE = True
 NUM_TRAJS = 1
 NUM_SCHED = 1
-NUM_ITERS = 2
-S = 100
+NUM_ITERS = 5
+S = 10000
+Delta = 10
+T = S / Delta
 em_vars = ['As', 'bs', 'Qs', 'Z']
-K = 2
+K = 4
 
 native = md.load('../data/native.pdb')
+filenames = {}
+filenames[10] = '../data/ala2_10.h5'
+filenames[100] = '../data/ala2_100.h5'
+filenames[1000] = '../data/ala2_1000.h5'
+filenames[10000] = '../data/ala2_10000.h5'
+out = '../data/metastable'
+outs = []
+for k in range(K):
+  outs.append('metastable' + str(k))
 if SIMULATE:
   topology = native.topology.to_openmm()
   forcefield = app.ForceField('amber99sbildn.xml', 'amber99_obc.xml')
@@ -39,31 +52,36 @@ if SIMULATE:
   simulation.context.setPositions(native.xyz[0])
   simulation.context.setVelocitiesToTemperature(330*unit.kelvin)
 
-  if not os.path.exists('../data/ala2.h5'):
-    simulation.reporters.append(md.reporters.HDF5Reporter('../data/ala2.h5', 10))
+  if DELETE and os.path.exists(filenames[T]):
+    os.remove(filenames[T])
+  if not os.path.exists(filenames[T]):
+    simulation.reporters.append(md.reporters.HDF5Reporter(
+      filenames[T], Delta))
     simulation.step(S)
+
 if LOAD:
-  traj_filename = '../data/ala2.h5'
-  traj = md.load(traj_filename)
-  topology = traj.topology
+  filename_list = [v for (k,v) in filenames.items()]
+  traj = md.load(filenames[T])
+  traj.superpose(native)
   (T, N_atoms, dim) = shape(traj.xyz)
   y_dim = N_atoms
   x_dim = y_dim
-  #diffs = reshape(traj.xyz, (T, y_dim))
   ys = distance_matrix(traj, native)
+  gen_movie(ys, native, filename_list, '../data/alanine_true', N_atoms)
 
-if LEARN:
-  means, assignments = kmeans(ys, K)
-  bs = means
-  Cs = zeros((K, y_dim, x_dim))
-  Rs = zeros((K, y_dim, y_dim))
-  for k in range(K):
-    Cs[k] = reshape(eye(x_dim), (y_dim, x_dim))
-    Rs[k] = reshape(0.01 * eye(y_dim), (y_dim, y_dim))
-  sim_T = 50
-  l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Rs=Rs)
-  l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
-  sim_xs,sim_Ss,sim_ys = l.sample(sim_T,s_init=0, x_init=means[0],
-      y_init=means[0])
-  filenames = ['../data/ala2.h5']
-  movie, xx = gen_movie(sim_ys, native, filenames, '../data/alanine', sim_T, N_atoms, dim)
+  if LEARN:
+    means, assignments = kmeans(ys, K)
+    bs = means
+    Cs = zeros((K, y_dim, x_dim))
+    Rs = zeros((K, y_dim, y_dim))
+    for k in range(K):
+      Cs[k] = reshape(eye(x_dim), (y_dim, x_dim))
+      Rs[k] = reshape(0.01 * eye(y_dim), (y_dim, y_dim))
+    l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Rs=Rs)
+    l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
+    sim_xs,sim_Ss,sim_ys = l.sample(T,s_init=0, x_init=means[0],
+        y_init=means[0])
+    gen_movie(sim_ys, native, filename_list,
+        '../data/alanine_sim', N_atoms)
+    metastable_states = l.compute_metastable_wells()
+    gen_structures(metastable_states, native, filename_list, outs, N_atoms)
