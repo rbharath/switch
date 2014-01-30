@@ -66,11 +66,11 @@ if LOAD:
   (T, N_atoms, dim) = shape(traj.xyz)
   y_dim = N_atoms
   x_dim = y_dim
-  ys = distance_matrix(traj, native)
-  gen_movie(ys, native, filename_list, '../data/alanine_true', N_atoms)
+  xs = distance_matrix(traj, native)
+  gen_movie(xs, native, filename_list, '../data/alanine_true', N_atoms)
 
   if LEARN:
-    means, assignments = kmeans(ys, K)
+    means, assignments = kmeans(xs, K)
     bs = means
     Cs = zeros((K, y_dim, x_dim))
     Rs = zeros((K, y_dim, y_dim))
@@ -78,10 +78,10 @@ if LOAD:
       Cs[k] = reshape(eye(x_dim), (y_dim, x_dim))
       Rs[k] = reshape(0.01 * eye(y_dim), (y_dim, y_dim))
     l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Rs=Rs)
-    l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
-    sim_xs,sim_Ss,sim_ys = l.sample(T,s_init=0, x_init=means[0],
+    l.em(xs[:], em_iters=NUM_ITERS, em_vars=em_vars)
+    sim_xs,sim_Ss = l.sample(T,s_init=0, x_init=means[0],
         y_init=means[0])
-    gen_movie(sim_ys, native, filename_list,
+    gen_movie(sim_xs, native, filename_list,
         '../data/alanine_sim', N_atoms)
     metastable_states = l.compute_metastable_wells()
     gen_structures(metastable_states, native, filename_list, outs, N_atoms)

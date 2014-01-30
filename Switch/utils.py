@@ -35,3 +35,54 @@ def logsumexp(x, dim=-1):
         lastdim = len(x.shape)-1
         xmax = x.max(lastdim)
         return xmax + log(sum(exp(x-xmax[...,newaxis]),lastdim))
+
+def iter_vars(A, Q,N):
+  V = eye(shape(A)[0])
+  for i in range(N):
+    V = Q + dot(A,dot(V, A.T))
+  return V
+
+def assignment_to_weights(assignments,K):
+  (T,) = shape(assignments)
+  W_i_Ts = zeros((T,K))
+  for t in range(T):
+    ind = assignments[t]
+    for k in range(K):
+      if k != ind:
+        W_i_Ts[t,k] = 0.0
+      else:
+        W_i_Ts[t,ind] = 1.0
+  return W_i_Ts
+
+def empirical_wells(Ys, W_i_Ts):
+  (T, y_dim) = shape(Ys)
+  (_, K) = shape(W_i_Ts)
+  means = zeros((K, y_dim))
+  covars = zeros((K, y_dim, y_dim))
+  for k in range(K):
+    num = zeros(y_dim)
+    denom = 0
+    for t in range(T):
+      num += W_i_Ts[t, k] * Ys[t]
+      denom += W_i_Ts[t,k]
+    means[k] = (1.0/denom) * num
+  for k in range(K):
+    num = zeros((y_dim, y_dim))
+    denom = 0
+    for t in range(T):
+      num += W_i_Ts[t, k] * outer(Ys[t] - means[k], Ys[t] - means[k])
+      denom += W_i_Ts[t,k]
+    covars[k] = (1.0/denom) * num
+  return means, covars
+
+def transition_counts(assignments, K):
+  (T,) = shape(assignments)
+  Zhat = ones((K, K))
+  for t in range(1,T):
+    i = assignments[t-1]
+    j = assignments[t]
+    Zhat[i,j] += 1
+  for i in range(K):
+    s = sum(Zhat[i])
+    Zhat[i] /= s
+  return Zhat

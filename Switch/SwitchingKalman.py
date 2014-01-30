@@ -27,8 +27,7 @@ class SwitchingKalmanFilter(object):
   """Implements a Switching Kalman Filter along with an EM algorithm.
   """
   def __init__(self, x_dim, y_dim, K=None, As=None, bs=None, Qs=None,
-      Cs=None, Rs=None, Z=None, pi=None, mus=None,
-      Sigmas=None):
+      Z=None, pi=None, mus=None, Sigmas=None):
     """
     Inputs:
       x_dim: dimension of hidden state
@@ -36,8 +35,6 @@ class SwitchingKalmanFilter(object):
       K: Number of switching states.
       As: System transition matrices for each switching state.
       Qs: System covariance matrices for each switching state.
-      Cs: Observation matrices for each switching state.
-      Rs: Observation covariance matrices for each switching state.
       Z: The switching matrix for the discrete state
       pi: The initial distribution over the discrete states
       mus: the initial means for each kalman filter
@@ -73,31 +70,6 @@ class SwitchingKalmanFilter(object):
         r = rand(x_dim, x_dim)
         r = (1.0/x_dim) * dot(r.T,r)
         self.Qs[i] = r
-    if Cs != None and shape(Cs) == (K, y_dim, x_dim):
-      self.Cs = copy(Cs)
-    else:
-      self.Cs = zeros((K, y_dim, x_dim))
-      for i in range(K):
-        if y_dim >= x_dim:
-          C = rand(x_dim, x_dim)#eye(x_dim)
-          # Stabilize C
-          u,s,v = svd(C)
-          s = minimum(s,1.0)
-          C = dot(u, dot(diag(s), v))
-          self.Cs[i,:x_dim,:] = C
-        else:
-          C = rand(y_dim, y_dim)#eye(y_dim)
-          # Stabilize C
-          u,s,v = svd(C)
-          s = minimum(s,1.0)
-          C = dot(u, dot(diag(s), v))
-          self.Cs[i,:,:y_dim] = C
-    if Rs != None and shape(Rs) == (K, y_dim, y_dim):
-      self.Rs = copy(Rs)
-    else:
-      self.Rs = zeros((K,y_dim,y_dim))
-      for i in range(K):
-        self.Rs[i] = 0.01 * eye(y_dim)
     if Z != None and shape(Z) == (K,K):
       self.Z = copy(Z)
     else:
@@ -138,13 +110,11 @@ class SwitchingKalmanFilter(object):
     Outputs:
       xs: Hidden continuous states
       Ss: Hidden switch states
-      ys: observation states
     """
     x_dim, y_dim, = self.x_dim, self.y_dim
     # Allocate Memory
     xs = zeros((T, x_dim))
     Ss = zeros(T)
-    ys = zeros((T, y_dim))
     # Sample Start conditions
     sample = multinomial(1,self.pi, size=1)
     if s_init == None:
@@ -155,23 +125,16 @@ class SwitchingKalmanFilter(object):
       xs[0] = multivariate_normal(self.mus[Ss[0]], self.Sigmas[Ss[0]])
     else:
       xs[0] = x_init
-    if y_init == None:
-      ys[0] = multivariate_normal(dot(self.Cs[Ss[0]],xs[0]),self.Rs[Ss[0]])
-    else:
-      ys[0] = y_init
     # Perform time updates
     for t in range(0,T-1):
       s = Ss[t]
       A = self.As[s]
       b = self.bs[s]
       Q = self.Qs[s]
-      C = self.Cs[s]
-      R = self.Rs[s]
       xs[t+1] = multivariate_normal(dot(A,xs[t]) + b, Q)
-      ys[t+1] = multivariate_normal(dot(C,xs[t+1]), R)
       sample = multinomial(1,self.Z[s],size=1)[0]
       Ss[t+1] = nonzero(sample)[0][0]
-    return (xs, Ss, ys)
+    return (xs, Ss)
 
   def filter(self, ys):
     """
@@ -252,169 +215,6 @@ class SwitchingKalmanFilter(object):
     return (logM_t_1t, logM_tt, W_ij, x_j_tt, x_tt, V_j_tt, V_ij_tt_1,
         log_ll_j_t, log_ll_t)
 
-  def smooth(self, x_j_tt, V_j_tt, V_ij_tt_1, logM_tt, ys):
-    """
-    Inputs:
-      x_j_tt = E[X_t|S_t=j,y_{1:t}]
-      V_j_tt = Cov[X_t|S_t=j,y_{1:t}]
-      V_ij_tt_1 = Cov[X_t,X_{t-1}|S_{t-1}=j,S_j=j,y_{1:t}]
-      logM_tt = log P[S_t = j|y_{1:t}]
-      ys: observations
-    Outputs:
-      x_j_tT = E[X_t|S_t=j,y_{1:T}]
-      V_j_tT = Cov[X_t|S_t=j,y_{1:T}]
-      logU_jk_t = P[S_t=j|S_{t+1}=k,y_{1:T}]
-      logM_tt_1T = log P[S_t=j,S_{t+1}=k|y_{1:T}]
-      logM_tT = log P[S_t=j|y_{1:T}]
-      W_kj_tT = P[S_{t+1}=k|S_t=j,y_{1:T}]
-      x_tT = E[X_t|y_{1:T}]
-      V_tT = Cov[X_t|y_{1:T}]
-    Intermediates:
-      x_jk_tT = E[x_{t}|y_{1:T}, S_{t}=j, S_{t+1}=k] \approx x_j_tT
-      x_j_forwardk_tT = E[x_{t}|y_{1:T},S_{t}=k,S_{t-1}=j]
-      V_jk_tT = Cov[X_t|y_{1:T}, S_{t}=j, S_{t+1}=k]
-      V_jk_tt_1T = Cov[X_t, X_{t-1}|y_{1:T}, S_{t}=j, S_{t+1}=k]
-      V_j_tt_1T = Cov[X_{t},X_{t-1}|S_{t}=j,y_{1:T}]
-      x_e_k_tT = E[X_t|y_{1:T},S_{t+1}=k]
-      V_tt_1T = E[X_t,X_{t-1}|y_{1:T}]
-    """
-    T = shape(ys)[0]
-    # Extract Dimensionality Information
-    x_dim, K = self.x_dim, self.K
-    # Allocate Output Memory
-    x_j_tT = zeros((T,K,x_dim))
-    V_j_tT = zeros((T,K,x_dim, x_dim))
-    logU_jk_t = zeros((T,K,K))
-    logM_tt_1T = zeros((T,K,K))
-    logM_tT = zeros((T,K))
-    logW_kj_tT = zeros((T,K,K))
-    x_j_tT = zeros((T,K,x_dim))
-    V_j_tT = zeros((T,K,x_dim,x_dim))
-    x_tT = zeros((T,x_dim))
-    V_tT = zeros((T,x_dim,x_dim))
-    # Allocate Intermediate Memory
-    x_jk_tT = zeros((T,K,K,x_dim))
-    x_j_forwardk_tT = zeros((T,K,K,x_dim))
-    V_jk_tT = zeros((T,K,K,x_dim, x_dim))
-    V_jk_tt_1T = zeros((T,K,K,x_dim, x_dim))
-    V_j_tt_1T = zeros((T,K,x_dim,x_dim))
-    x_e_k_tT = zeros((T,K,x_dim))
-    V_tt_1T = zeros((T,x_dim,x_dim))
-    # Allocate Initial Conditions
-    x_j_tT[T-1] = x_j_tt[T-1]
-    V_j_tT[T-1] = V_j_tt[T-1]
-    logM_tT[T-1] = logM_tt[T-1]
-    (x_tT[T-1], _, V_tT[T-1]) = \
-        Collapse(x_j_tT[T-1], V_j_tT[T-1], exp(logM_tT[T-1]))
-    # Perform Backward Update Loop
-    for t in range(T-2,-1,-1):
-      for j in range(K):
-        for k in range(K):
-          (x_jk_tT[t,j,k], V_jk_tT[t,j,k], V_jk_tt_1T[t+1,j,k]) =\
-            Smooth(x_j_tT[t+1,k], V_j_tT[t+1,k],
-                    x_j_tt[t,j], V_j_tt[t,j], V_j_tt[t+1,k],
-                    V_ij_tt_1[t+1,j,k], self.As[k], self.bs[k], self.Qs[k])
-      for j in range(K):
-        for k in range(K):
-          logU_jk_t[t, j, k] = logM_tt[t+1,j] + log(self.Z[j,k])
-      logU_jk_t[t] = logU_jk_t[t] - logsumexp(logU_jk_t[t], dim=0)
-      for j in range(K):
-        for k in range(K):
-          logM_tt_1T[t,j,k] = logU_jk_t[t,j,k] + logM_tT[t+1,k]
-      for j in range(K):
-        logM_tT[t,j] = logsumexp(logM_tt_1T[t,j])
-      for j in range(K):
-        for k in range(K):
-          logW_kj_tT[t,k,j] = logM_tt_1T[t,j,k] - logM_tT[t,j]
-      for j in range(K):
-        (x_j_tT[t,j], _, V_j_tT[t,j]) =\
-            Collapse(x_jk_tT[t,j], V_jk_tT[t,j], exp(logW_kj_tT[t, :, j]))
-      (x_tT[t], _, V_tT[t]) = \
-          Collapse(x_j_tT[t], V_j_tT[t], exp(logM_tT[t]))
-      for j in range(K):
-        x_j_forwardk_tT[t+1,:,k] = x_j_tT[t+1,k] # An Approximation
-        for k in range(K):
-          (_,_,V_j_tt_1T[t+1,k]) = CollapseCross(
-              x_j_forwardk_tT[t+1,:,k],
-              x_jk_tT[t,:,k], V_jk_tt_1T[t+1,:,k], exp(logU_jk_t[t,:,k]))
-      for k in range(K):
-        s = zeros(x_dim)
-        for j in range(K):
-          s += x_jk_tT[t,j,k] * exp(logU_jk_t[t,j,k])
-        x_e_k_tT[t,k] = s
-      (_,_,V_tt_1T[t+1]) = CollapseCross(x_j_tT[t+1], x_e_k_tT[t],
-                              V_j_tt_1T[t+1], exp(logM_tT[t+1]))
-    return (x_j_tT, V_j_tT, logU_jk_t, logM_tt_1T, logM_tT, logW_kj_tT, x_tT, V_tT)
-
-  def inference(self, xs):
-    """
-    Inputs:
-      xs: E[x_t | y_{1:T}]
-    Outputs:
-      S_j_t_x_1t: P[S_t = j|x_{1:t}] (forward pass)
-      S_j_t_x_1T: P[S_t = j|x_{1:T}] (backward pass)
-      S_jk_tt_1_x_1T: P[S_t=j,S_{t+1}=k|x_{1:T}] (joint)
-    Intermediates:
-      S_k_t_1_x_1t = P[S_{t+1} = k|x_{1:t}]
-    """
-    (T,x_dim) = shape(xs)
-    K = self.K
-    # Initialize Memory
-    S_j_t_x_1t = zeros((T,K))
-    S_k_t_1_x_1t = zeros((T,K))
-    S_j_t_x_1T = zeros((T,K))
-    S_jk_tt_1_x_1T = zeros((T,K,K))
-    # forward passs
-    for t in range(T):
-      for j in range(K):
-        if t > 0:
-          L_t_j = exp(log_multivariate_normal_pdf(xs[t],
-                        dot(self.As[j], xs[t-1]),self.Qs[j]))
-        else:
-          L_t_j = exp(log_multivariate_normal_pdf(xs[t],
-                        self.mus[j], self.Sigmas[j]))
-        s = 0
-        if L_t_j == 0:
-          L_t_j = EPSILON
-        for i in range(K):
-          if t > 0:
-            s += self.Z[i,j] * S_j_t_x_1t[t-1,i]
-          else:
-            s += self.Z[i,j] * self.pi[i]
-        s *= L_t_j
-        S_j_t_x_1t[t,j] = s
-      c = sum(S_j_t_x_1t[t])
-      if c == 0:
-        raise ValueError
-      S_j_t_x_1t[t] /= c
-    # Compute the one-step look-ahead matrix
-    for t in range(T-1):
-      for k in range(K):
-        s = 0
-        for j in range(K):
-          s += S_j_t_x_1t[t,j] * self.Z[j,k]
-        S_k_t_1_x_1t[t,k] = s
-      c = sum(S_k_t_1_x_1t[t])
-      S_k_t_1_x_1t[t] /= c
-    # Initialize the backwards pass
-    S_j_t_x_1T[T-1] = S_j_t_x_1t[T-1]
-    # backward pass
-    for t in range(T-2,-1,-1):
-      for j in range(K):
-        s = 0
-        for k in range(K):
-          const_k = S_j_t_x_1t[t,j] * self.Z[j,k] / (S_k_t_1_x_1t[t,k])
-          s += const_k * S_j_t_x_1T[t+1,k]
-        S_j_t_x_1T[t,j] = s
-      c = sum(S_j_t_x_1T[t])
-      S_j_t_x_1T[t] /= c
-    # joint pass
-    for t in range(T-1):
-      for j in range(K):
-        for k in range(K):
-         S_jk_tt_1_x_1T[t,j,k] = S_j_t_x_1T[t,j] * self.Z[j,k]
-    return (S_j_t_x_1t, S_j_t_x_1T, S_jk_tt_1_x_1T)
-
   def em(self, ys, em_iters=10, em_vars='all'):
     """
     Expectation Maximization
@@ -434,29 +234,24 @@ class SwitchingKalmanFilter(object):
     means, assignments = kmeans(ys, K)
     while itr < em_iters:
       print "\tEM Iteration = %d" % itr
-      (_, logM_tts, _, x_j_tts, x_tts,
-          V_j_tts, V_ij_tt_1s, log_ll_j_ts, log_ll_ts) \
+      (_, _, _, _, _, _, V_ij_tt_1s, log_ll_j_ts, log_ll_ts) \
               = self.filter(ys)
       print "\t\tLog_ll = %s" % str(log_ll_ts[T-1])
-      # Now perform smoothing
-      (x_j_tTs, _, _, logM_tt_1Ts, _, _, x_tTs, _) = \
-          self.smooth(x_j_tts, V_j_tts,
-              V_ij_tt_1s, logM_tts, ys)
       ## Now perform inference
       #(_, S_j_t_x_1Ts, S_jk_tt_1_x_1Ts) = \
       #    self.inference(x_tTs)
       if itr < em_iters:
-        means, assignments = kmeans(x_tTs, K)
+        means, assignments = kmeans(ys, K)
         S_j_t_x_1Ts = assignment_to_weights(assignments, K)
         Zhat = transition_counts(assignments, K)
         S_jk_tt_1_x_1Ts = tile(Zhat, (T,1,1))
       self.em_update(S_j_t_x_1Ts, S_jk_tt_1_x_1Ts,
-          x_tTs, ys, alpha, itr, em_vars)
+          ys, ys, alpha, itr, em_vars)
       W_i_Ts[itr] = S_j_t_x_1Ts
       itr += 1
     return S_jk_tt_1_x_1Ts
 
-  def em_update(self, W_i_T, M_tt_1T, x_tT, ys, alpha, itr,
+  def em_update(self, W_i_T, M_tt_1T, xs, ys, alpha, itr,
       em_vars='all'):
     """
     TODO: Add support for C and R learning
@@ -468,130 +263,55 @@ class SwitchingKalmanFilter(object):
         M_tt_1T = P[S_t=j,S_{t+1}=k|y_{1:T}] or
         M_tt_1T = P[S_t=j,S_{t+1}=k|x_{1:T}]
         depending on whether system is fully observable.
-      x_tTs: The sequence satisfies
-        x_tT = E[X_t|y_{1:T}] (T, x_dim)
       em_vars: Variables to perform learning on
-    Outputs:
-      None (all updates are made to internal state)
     """
     K, x_dim, y_dim = self.K, self.x_dim, self.y_dim
-    (T, _) = shape(x_tT)
+    (T, _) = shape(xs)
     P_cur_prev = zeros((T,x_dim,x_dim))
     P_cur = zeros((T, x_dim, x_dim))
-    means, covars = empirical_wells(ys, W_i_T)
+    means, covars = empirical_wells(xs, W_i_T)
     for t in range(T):
       if t > 0:
-        P_cur_prev[t] = outer(x_tT[t], x_tT[t-1])
-      P_cur[t] = outer(x_tT[t], x_tT[t])
-    # Update Cs
-    if 'Cs' in em_vars:
-      self.C_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
-          ys, alpha, covars, P_cur_prev, P_cur, itr)
-    # Update Rs
-    if 'Rs' in em_vars:
-      self.R_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
-          ys, alpha, covars, P_cur_prev, P_cur, itr)
+        P_cur_prev[t] = outer(xs[t], xs[t-1])
+      P_cur[t] = outer(xs[t], xs[t])
     # Update As
     if 'As' in em_vars:
-      self.A_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+      self.A_update(T, x_dim, W_i_T, M_tt_1T, ys, alpha, covars,
             P_cur_prev, P_cur, itr)
     # Update bs
     if 'bs' in em_vars:
-      self.b_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, means,
+      self.b_update(T, x_dim, W_i_T, M_tt_1T, ys, alpha, means,
           covars, P_cur_prev, P_cur, itr)
     # Update Qs
     if 'Qs' in em_vars:
-      self.Q_update(T, x_dim, W_i_T, x_tT, alpha, itr, covars)
+      self.Q_update(T, x_dim, W_i_T, ys, alpha, itr, covars)
     # Update mus
     if 'mus' in em_vars:
-      self.mu_update(T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+      self.mu_update(T, x_dim, W_i_T, M_tt_1T, ys, alpha, covars,
         P_cur_prev, P_cur, itr)
-    # Update Sigmas
-    if 'Sigmas' in em_vars:
-      self.sigma_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
-          ys, alpha, covars, P_cur_prev, P_cur, itr)
     # Update Z
     if 'Z' in em_vars:
-      self.Z_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
-          ys, alpha, covars, P_cur_prev, P_cur, itr)
-    # Update pis
-    if 'pi' in em_vars:
-      self.pi_update(T, x_dim, W_i_T, M_tt_1T, x_tT,
-          ys, alpha, covars, P_cur_prev, P_cur, itr)
+      self.Z_update(T, x_dim, W_i_T, M_tt_1T,
+          alpha, covars, P_cur_prev, P_cur, itr)
 
-  def C_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
-        P_cur_prev, P_cur, itr):
-    K, x_dim, y_dim = self.K, self.x_dim, self.y_dim
-    for i in range(K):
-      Cnum = zeros((y_dim, x_dim))
-      Cdenom = zeros((x_dim, x_dim))
-      for t in range(0,T):
-        Cnum += W_i_T[t,i] * outer(ys[t], x_tT[t])
-        Cdenom += W_i_T[t,i] * P_cur[t]
-      C = dot(Cnum, linalg.pinv(Cdenom))
-      self.Cs[i] = C
-
-  def R_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
-        P_cur_prev, P_cur, itr):
-    K, y_dim, x_dim = self.K, self.y_dim, self.x_dim
-    for i in range(K):
-      Rdenom = alpha
-      if x_dim == y_dim:
-        Lambda = alpha * eye(x_dim)
-      R1 = zeros((y_dim, y_dim))
-      R2 = zeros((x_dim, y_dim))
-      for t in range(T):
-        R1 += W_i_T[t,i] * outer(ys[t], ys[t])
-        R2 += W_i_T[t,i] * outer(x_tT[t], ys[t])
-        Rdenom += W_i_T[t,i]
-      Rnum = Lambda + R1 + dot(self.Cs[i], R2)
-      self.Rs[i] = (1/Rdenom) * Rnum
-
-  def b_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha,
+  def b_update(self, T, x_dim, W_i_T, M_tt_1T, ys, alpha,
       means, covars, P_cur_prev, P_cur, itr):
     K, x_dim = self.K, self.x_dim
     for i in range(K):
-      #bnum = zeros((x_dim))
-      #bdenom = 0
-      #for t in range(1,T):
-      #  bnum += W_i_T[t,i] * (x_tT[t] - dot(self.As[i], x_tT[t-1]))
-      #  bdenom += W_i_T[t,i]
-      #self.bs[i] = (1/bdenom) * bnum
       self.bs[i] = dot(eye(x_dim) - self.As[i], means[i])
 
-  def mu_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+  def mu_update(self, T, x_dim, W_i_T, M_tt_1T, xs, alpha, covars,
         P_cur_prev, P_cur, itr):
     K, x_dim = self.K, self.x_dim
     for i in range(K):
       mu_num = zeros(x_dim)
       mu_denom = 0
-      mu_num += W_i_T[0,i] * x_tT[0]
+      mu_num += W_i_T[0,i] * xs[0]
       mu_denom += W_i_T[0,i]
       if mu_denom > 0:
         self.mus[i] = (1/mu_denom) * mu_num
 
-  def sigma_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
-        P_cur_prev, P_cur, itr):
-    Lambda = alpha * eye(x_dim)
-    for i in range(self.K):
-      Sigma_num_1 = zeros((x_dim, x_dim))
-      Sigma_num_2 = zeros((1, x_dim))
-      Sigma_num_3 = zeros((x_dim, 1))
-      Sigma_num_4 = 0
-      Sigma_num_1 += W_i_T[0,i] * outer(x_tT[0], x_tT[0])
-      Sigma_num_2 += W_i_T[0,i] * x_tT[0]
-      Sigma_num_2 += W_i_T[0,i] * x_tT[0]
-      Sigma_num_4 += W_i_T[0,i]
-      Sigma_denom = Sigma_num_4
-      Sigma_num = (Sigma_num_1 - outer(self.mus[i], Sigma_num_2) -
-          outer(Sigma_num_3, self.mus[i].T) +
-          Sigma_num_4 * outer(self.mus[i],self.mus[i]))
-      prop_sigma = (1/(Sigma_denom+alpha)) * (Lambda + Sigma_num)
-      # Adding in this test to ensure that we don't get non-psd matrices
-      if min(linalg.eig(prop_sigma)[0]) > 0:
-        self.Sigmas[i] = prop_sigma
-
-  def Z_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+  def Z_update(self, T, x_dim, W_i_T, M_tt_1T, alpha, covars,
         P_cur_prev, P_cur, itr):
     K = self.K
     Z = zeros((K,K))
@@ -607,18 +327,10 @@ class SwitchingKalmanFilter(object):
       Z[i,:] /= s
     self.Z = Z
 
-  def pi_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
+  def A_update(self, T, x_dim, W_i_T, M_tt_1T, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
-    K = self.K
-    for i in range(K):
-      self.pi[i] += W_i_T[0,i]
-      self.pi[i] /= double(K)
-    self.pi = self.pi/(sum(self.pi))
-
-  def A_update(self, T, x_dim, W_i_T, M_tt_1T, x_tT, ys, alpha, covars,
-        P_cur_prev, P_cur, itr):
-    #eta = 0.5
-    eta = 0.99
+    eta = 0.5
+    #eta = 0.99
     for i in range(self.K):
       Anum = zeros((x_dim, x_dim))
       Adenom = zeros((x_dim, x_dim))
@@ -630,15 +342,7 @@ class SwitchingKalmanFilter(object):
       s = maximum(minimum(s,ones(shape(s))), -1.0 * ones(shape(s)))
       self.As[i] = eta * dot(u,dot(diag(s), v))
 
-  def Q_update(self, T, x_dim, W_i_T, x_tT, alpha, itr, covars):
-    ##self.Qs = covars
-    #K = self.K
-    #eta = 0.1
-    #for k in range(K):
-    #  A = eta * self.As[k]
-    #  D = covars[k]
-    #  self.Qs[k] = D - dot(A, dot(D, A.T))
-    #return
+  def Q_update(self, T, x_dim, W_i_T, xs, alpha, itr, covars):
     N_steps = 1
     for step in range(N_steps):
       eta = 2.0/(itr*N_steps + step+2)
@@ -649,8 +353,8 @@ class SwitchingKalmanFilter(object):
         Anum = zeros((x_dim, x_dim))
         Adenom = zeros((x_dim, x_dim))
         for t in range(1,T):
-          x_t = x_tT[t]
-          x_t_pred = dot(self.As[i], x_tT[t-1]) + self.bs[i]
+          x_t = xs[t]
+          x_t_pred = dot(self.As[i], xs[t-1]) + self.bs[i]
           diff = x_t - x_t_pred
           Qnum += W_i_T[t,i] * outer(diff, diff)
           Qdenom += W_i_T[t,i]
@@ -727,32 +431,6 @@ def Filter(x, V, y, A, b, Q, C, R):
   logL = log_multivariate_normal_pdf(y - cor_x,zeros(shape(e)),cor_V)
   return (cor_x, cor_V, cor_V_joint, logL)
 
-def Smooth(x_t_1T, V_t_1T, x_tt, V_tt, V_t_1t_1, V_t_1tt_1, A, b, Q):
-  """
-  Inputs:
-    x_t_1T: x_{t+1|T}
-    V_t_1T:  V_{t+1|T}
-    x_tt: x_{t|t}
-    V_tt: V_{t|t}
-    V_t_1t_1: V_{t+1|t+1}
-    V_t_1tt_1: V_{t+1,t|t+1}
-    A: transition matrix
-    Q: transition covariance
-  Outputs:
-    x_tT: x_{t:T}
-    V_tT: V_{t|T}
-    V_t_1tT: V_{t+1,t|T}
-  """
-  x_t_1t = dot(A,x_tt) + b
-  V_t_1t = dot(A,dot(V_tt, A.T)) + Q
-
-  J = dot(V_tt, dot(A.T, linalg.pinv(V_t_1t)))
-  x_tT = x_tt + dot(J, x_t_1T - x_t_1t)
-  V_tT = V_tt + dot(J, dot(V_t_1T - V_t_1t, J.T))
-  V_t_1tT = V_t_1tt_1 + dot(V_t_1T - V_t_1t_1,
-            dot(linalg.pinv(V_t_1t_1), V_t_1tt_1))
-  return (x_tT, V_tT, V_t_1tT)
-
 def CollapseCross(mu_Xs, mu_Ys, V_Xs_Ys, Ps):
   """
   Inputs:
@@ -795,54 +473,3 @@ def Collapse(mu_Xs, V_Xs, Ps):
   Outputs:
   """
   return CollapseCross(mu_Xs, mu_Xs, V_Xs, Ps)
-
-def iter_vars(A, Q,N):
-  V = eye(shape(A)[0])
-  for i in range(N):
-    V = Q + dot(A,dot(V, A.T))
-  return V
-
-def assignment_to_weights(assignments,K):
-  (T,) = shape(assignments)
-  W_i_Ts = zeros((T,K))
-  for t in range(T):
-    ind = assignments[t]
-    for k in range(K):
-      if k != ind:
-        W_i_Ts[t,k] = 0.0
-      else:
-        W_i_Ts[t,ind] = 1.0
-  return W_i_Ts
-
-def empirical_wells(Ys, W_i_Ts):
-  (T, y_dim) = shape(Ys)
-  (_, K) = shape(W_i_Ts)
-  means = zeros((K, y_dim))
-  covars = zeros((K, y_dim, y_dim))
-  for k in range(K):
-    num = zeros(y_dim)
-    denom = 0
-    for t in range(T):
-      num += W_i_Ts[t, k] * Ys[t]
-      denom += W_i_Ts[t,k]
-    means[k] = (1.0/denom) * num
-  for k in range(K):
-    num = zeros((y_dim, y_dim))
-    denom = 0
-    for t in range(T):
-      num += W_i_Ts[t, k] * outer(Ys[t] - means[k], Ys[t] - means[k])
-      denom += W_i_Ts[t,k]
-    covars[k] = (1.0/denom) * num
-  return means, covars
-
-def transition_counts(assignments, K):
-  (T,) = shape(assignments)
-  Zhat = ones((K, K))
-  for t in range(1,T):
-    i = assignments[t-1]
-    j = assignments[t]
-    Zhat[i,j] += 1
-  for i in range(K):
-    s = sum(Zhat[i])
-    Zhat[i] /= s
-  return Zhat

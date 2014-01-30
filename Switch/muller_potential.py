@@ -46,7 +46,7 @@ for k in range(K):
 
 # Allocate Memory
 start = T/4
-ys = zeros((NUM_TRAJS * (T-start), y_dim))
+xs = zeros((NUM_TRAJS * (T-start), y_dim))
 
 # Clear Display
 pp.cla()
@@ -77,36 +77,36 @@ for traj in range(NUM_TRAJS):
     # Save the state
     #print "\tshape(x[%d]) = %s" % (i, str(shape(x)))
     if i > start:
-      ys[traj * (T-start) + (i-start),:] = x[0,0:2]
+      xs[traj * (T-start) + (i-start),:] = x[0,0:2]
     trajectory[i,:] = x[0,0:2]
     integrator.step(10)
   if PLOT:
     pp.plot(trajectory[start:,0], trajectory[start:,1], color='k')
     # Compute K-means
-    means, assignments = kmeans(ys, K)
+    means, assignments = kmeans(xs, K)
     pp.scatter(means[:,0], means[:,1], color='r',zorder=10)
-    pp.scatter(ys[:,0], ys[:,1], edgecolor='none', facecolor='k',zorder=1)
+    pp.scatter(xs[:,0], xs[:,1], edgecolor='none', facecolor='k',zorder=1)
     pp.show()
 
 if LEARN:
   # Learn the Switching Filter
   bs = means
   l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Rs=Rs)
-  l.em(ys[:], em_iters=NUM_ITERS, em_vars=em_vars)
-  sim_xs,sim_Ss,sim_ys = l.sample(sim_T,s_init=0, x_init=means[0], y_init=means[0])
+  l.em(xs[:], em_iters=NUM_ITERS, em_vars=em_vars)
+  sim_xs,sim_Ss = l.sample(sim_T,s_init=0, x_init=means[0], y_init=means[0])
 
 if PLOT:
   Delta = 0.5
-  minx = min(ys[:,0])
-  maxx = max(ys[:,0])
-  miny = min(ys[:,1])
-  maxy = max(ys[:,1])
+  minx = min(xs[:,0])
+  maxx = max(xs[:,0])
+  miny = min(xs[:,1])
+  maxy = max(xs[:,1])
   if LEARN:
-    minx = min(min(sim_ys[:,0]), minx) - Delta
-    maxx = max(max(sim_ys[:,0]), maxx) + Delta
+    minx = min(min(sim_xs[:,0]), minx) - Delta
+    maxx = max(max(sim_xs[:,0]), maxx) + Delta
     miny = min(min(sim_xs[:,1]), miny) - Delta
     maxy = max(max(sim_xs[:,1]), maxy) + Delta
-    pp.scatter(sim_ys[:,0], sim_ys[:,1], edgecolor='none',
+    pp.scatter(sim_xs[:,0], sim_xs[:,1], edgecolor='none',
         zorder=5,facecolor='g')
-    pp.plot(sim_ys[:,0], sim_ys[:,1], zorder=5,color='g')
+    pp.plot(sim_xs[:,0], sim_xs[:,1], zorder=5,color='g')
   MullerForce.plot(ax=pp.gca(),minx=minx,maxx=maxx,miny=miny,maxy=maxy)
