@@ -34,9 +34,10 @@ Z = reshape(array([[0.98, 0.02],[0.02, 0.98]]), (K,K))
 pi = reshape(array([0.99,0.01]), (K,))
 mus = reshape(array([[1],[-1]]), (K,x_dim))
 Sigmas = reshape(array([[0.01],[0.01]]), (K,x_dim,x_dim))
-#em_vars = ['As','Qs', 'bs', 'pi', 'Z', 'mus', 'Sigmas', 'Cs', 'Rs']
-em_vars = ['As', 'bs', 'Qs', 'Z']
-s = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Cs=Cs,Rs=Rs,Z=Z, pi=pi,Sigmas=Sigmas, mus=mus)
+
+#em_vars = ['As','Qs', 'bs', 'pi', 'Z', 'mus', 'Sigmas']
+em_vars = ['As', 'bs', 'Qs', 'Z', 'mus']
+s = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Z=Z)
 if SAMPLE:
   xs,Ss = s.sample(T)
   savetxt('../example/xs.txt', xs)
@@ -44,11 +45,7 @@ if SAMPLE:
 else:
   xs = reshape(loadtxt('../example/xs.txt'), (T,x_dim))
   Ss = reshape(loadtxt('../example/Ss.txt'), (T))
-# Now perform filtering
-(M_t_1t, M_tt, W_ij, x_j_tt,x_tt, V_j_tt, V_ij_tt_1,log_ll_j_t,log_ll_t) =\
-    s.filter(xs)
-true_log_ll = log_ll_t[T-1]
-print "True Log-LL = %s" % str(true_log_ll)
+#print "True Log-LL = %s" % str(true_log_ll)
 if LEARN:
   # Compute K-means
   means, assignments = kmeans(xs, K)
@@ -59,11 +56,11 @@ if LEARN:
     u, s, v = svd(A)
     As[i] = rand() * dot(u, v.T)
     bs[i] = dot(eye(x_dim) - As[i], means[i])
-  l = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Cs=Cs,Rs=Rs,Z=Z, pi=pi,Sigmas=Sigmas, mus=mus)
+  l = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Z=Z)
   l.em(xs, em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss = l.sample(T,s_init=0, x_init=means[0],
       y_init=means[0])
-print "True Log-LL = %s" % str(true_log_ll)
+#print "True Log-LL = %s" % str(true_log_ll)
 if PLOT:
   plt.close('all')
   plt.figure(1)
