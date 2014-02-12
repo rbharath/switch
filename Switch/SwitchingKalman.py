@@ -227,7 +227,7 @@ class SwitchingKalmanFilter(object):
       P_cur[t] = outer(xs[t], xs[t])
     # Update As
     if 'As' in em_vars:
-      self.A_update(T, x_dim, W_i_T, ys, alpha, covars,
+      self.A_update(stats, T, x_dim, W_i_T, ys, alpha, covars,
             P_cur_prev, P_cur, itr)
     # Update bs
     if 'bs' in em_vars:
@@ -271,20 +271,26 @@ class SwitchingKalmanFilter(object):
       Z[i,:] /= s
     self.Z = Z
 
-  def A_update(self, T, x_dim, W_i_T, ys, alpha, covars,
+  def A_update(self, stats, T, x_dim, W_i_T, ys, alpha, covars,
         P_cur_prev, P_cur, itr):
     eta = 0.5
     #eta = 0.99
     for i in range(self.K):
-      Anum = zeros((x_dim, x_dim))
-      Adenom = zeros((x_dim, x_dim))
-      for t in range(1,T):
-        Anum += W_i_T[t,i] * P_cur_prev[t]
-        Adenom += W_i_T[t,i] * P_cur[t-1]
+      Anum = stats['cor'][i]
+      Adenom = stats['cov_but_last'][i]
       self.As[i] = dot(Anum, linalg.pinv(Adenom))
       u,s,v = svd(self.As[i])
       s = maximum(minimum(s,ones(shape(s))), -1.0 * ones(shape(s)))
       self.As[i] = eta * dot(u,dot(diag(s), v))
+      #Anum = zeros((x_dim, x_dim))
+      #Adenom = zeros((x_dim, x_dim))
+      #for t in range(1,T):
+      #  Anum += W_i_T[t,i] * P_cur_prev[t]
+      #  Adenom += W_i_T[t,i] * P_cur[t-1]
+      #self.As[i] = dot(Anum, linalg.pinv(Adenom))
+      #u,s,v = svd(self.As[i])
+      #s = maximum(minimum(s,ones(shape(s))), -1.0 * ones(shape(s)))
+      #self.As[i] = eta * dot(u,dot(diag(s), v))
 
   def Q_update(self, stats, T, x_dim, W_i_T, xs, alpha, itr, covars):
     eta = 2.0/(itr+2)
