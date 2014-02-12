@@ -182,7 +182,10 @@ class SwitchingKalmanFilter(object):
     stats = {}
     stats['cor'] = zeros((K, x_dim, x_dim))
     stats['cov'] = zeros((K, x_dim, x_dim))
+    stats['cov_but_last'] = zeros((K, x_dim, x_dim))
     stats['mean'] = zeros((K, x_dim))
+    stats['mean_but_first'] = zeros((K, x_dim))
+    stats['mean_but_last'] = zeros((K, x_dim))
     stats['transitions'] = zeros((K,K))
     # Use Laplace Pseudocounts
     stats['total'] = ones(K)
@@ -192,13 +195,15 @@ class SwitchingKalmanFilter(object):
       for k in range(K):
         if t > 0:
           stats['cor'][k] += W_i_T[t,k] * outer(xs[t], xs[t-1])
-        stats['cov'][k] += W_i_T[t,k] * outer(xs[t], xs[t])
+          stats['cov'][k] += W_i_T[t,k] * outer(xs[t], xs[t])
+          stats['total_but_first'][k] += W_i_T[t,k]
+          stats['mean_but_first'][k] += W_i_T[t,k] * xs[t]
         stats['mean'][k] += W_i_T[t,k] * xs[t]
         stats['total'][k] += W_i_T[t,k]
         if t < T:
           stats['total_but_last'][k] += W_i_T[t,k]
-        if t > 0:
-          stats['total_but_first'][k] += W_i_T[t,k]
+          stats['mean_but_last'][k] += W_i_T[t,k] * xs[t]
+          stats['cov_but_last'][k] += W_i_T[t,k] * outer(xs[t], xs[t])
     stats['transitions'] = M_tt_1T[0]
     return stats
 
@@ -230,7 +235,7 @@ class SwitchingKalmanFilter(object):
           covars, P_cur_prev, P_cur, itr)
     # Update Qs
     if 'Qs' in em_vars:
-      self.Q_update(T, x_dim, W_i_T, ys, alpha, itr, covars)
+      self.Q_update(stats, T, x_dim, W_i_T, ys, alpha, itr, covars)
     # Update mus
     if 'mus' in em_vars:
       self.mu_update(stats, W_i_T, ys, itr)
@@ -281,25 +286,36 @@ class SwitchingKalmanFilter(object):
       s = maximum(minimum(s,ones(shape(s))), -1.0 * ones(shape(s)))
       self.As[i] = eta * dot(u,dot(diag(s), v))
 
-  def Q_update(self, T, x_dim, W_i_T, xs, alpha, itr, covars):
-    N_steps = 1
-    for step in range(N_steps):
-      eta = 2.0/(itr*N_steps + step+2)
-      Lambda = alpha * eye(x_dim)
-      for i in range(self.K):
-        Qdenom = alpha
-        Qnum = Lambda
-        Anum = zeros((x_dim, x_dim))
-        Adenom = zeros((x_dim, x_dim))
-        for t in range(1,T):
-          x_t = xs[t]
-          x_t_pred = dot(self.As[i], xs[t-1]) + self.bs[i]
-          diff = x_t - x_t_pred
-          Qnum += W_i_T[t,i] * outer(diff, diff)
-          Qdenom += W_i_T[t,i]
-        Qgrad = -0.5 * Qnum + 0.5 * Qdenom * self.Qs[i]
-        Qpred = (1.0/Qdenom) * Qnum
-        self.Qs[i] = Qpred
+  def Q_update(self, stats, T, x_dim, W_i_T, xs, alpha, itr, covars):
+    eta = 2.0/(itr+2)
+    Lambda = alpha * eye(x_dim)
+    for i in range(self.K):
+      A = self.As[i]
+      b = reshape(self.bs[i], (x_dim, 1))
+      Qnum = ((stats['cov'][i]
+               - dot(stats['cor'][i], A.T)
+               - dot(stats['mean_but_first'][i], b.T)) +
+              (-dot(A,stats['cor'][i].T) +
+                dot(A,dot(stats['cov_but_last'][i], A.T)) +
+                dot(A,dot(stats['mean_but_last'][i], b.T))) +
+              (-dot(b,stats['mean_but_first'][i].T) +
+                dot(b,dot(stats['mean_but_last'][i].T, A.T)) +
+                stats['total_but_first'][i] * dot(b, b.T)))
+      Qdenom = stats['total_but_first'][i]
+      self.Qs[i] = (1.0/Qdenom) * Qnum
+      #Qdenom = alpha
+      #Qnum = Lambda
+      #Anum = zeros((x_dim, x_dim))
+      #Adenom = zeros((x_dim, x_dim))
+      #for t in range(1,T):
+      #  x_t = xs[t]
+      #  x_t_pred = dot(self.As[i], xs[t-1]) + self.bs[i]
+      #  diff = x_t - x_t_pred
+      #  Qnum += W_i_T[t,i] * outer(diff, diff)
+      #  Qdenom += W_i_T[t,i]
+      #Qgrad = -0.5 * Qnum + 0.5 * Qdenom * self.Qs[i]
+      #Qpred = (1.0/Qdenom) * Qnum
+      #self.Qs[i] = Qpred
 
   def compute_metastable_wells(self):
     """Compute the metastable wells according to the formula
