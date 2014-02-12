@@ -182,12 +182,13 @@ class SwitchingKalmanFilter(object):
     stats = {}
     stats['cor'] = zeros((K, x_dim, x_dim))
     stats['cov'] = zeros((K, x_dim, x_dim))
+    stats['cov_but_first'] = zeros((K, x_dim, x_dim))
     stats['cov_but_last'] = zeros((K, x_dim, x_dim))
     stats['mean'] = zeros((K, x_dim))
     stats['mean_but_first'] = zeros((K, x_dim))
     stats['mean_but_last'] = zeros((K, x_dim))
     stats['transitions'] = zeros((K,K))
-    # Use Laplace Pseudocounts
+    # Use Laplacian Pseudocounts
     stats['total'] = ones(K)
     stats['total_but_last'] = ones(K)
     stats['total_but_first'] = ones(K)
@@ -195,9 +196,10 @@ class SwitchingKalmanFilter(object):
       for k in range(K):
         if t > 0:
           stats['cor'][k] += W_i_T[t,k] * outer(xs[t], xs[t-1])
-          stats['cov'][k] += W_i_T[t,k] * outer(xs[t], xs[t])
+          stats['cov_but_first'][k] += W_i_T[t,k] * outer(xs[t], xs[t])
           stats['total_but_first'][k] += W_i_T[t,k]
           stats['mean_but_first'][k] += W_i_T[t,k] * xs[t]
+        stats['cov'][k] += W_i_T[t,k] * outer(xs[t], xs[t])
         stats['mean'][k] += W_i_T[t,k] * xs[t]
         stats['total'][k] += W_i_T[t,k]
         if t < T:
@@ -239,6 +241,9 @@ class SwitchingKalmanFilter(object):
     # Update mus
     if 'mus' in em_vars:
       self.mu_update(stats, W_i_T, ys, itr)
+    # Update Sigmas
+    if 'Sigmas' in em_vars:
+      self.Sigma_update(stats, W_i_T, ys, itr)
     # Update Z
     if 'Z' in em_vars:
       self.Z_update(stats, W_i_T, M_tt_1T, T, K)
@@ -255,6 +260,17 @@ class SwitchingKalmanFilter(object):
     for k in range(K):
       # Use Laplace Pseudocount
       self.mus[k] = stats['mean'][k] / (stats['total'][k])
+
+  def Sigma_update(self, stats, W_i_T, xs, itr):
+    K, x_dim = self.K, self.x_dim
+    for k in range(K):
+      mu = reshape(self.mus[k], (x_dim, 1))
+      Sigma_num = (stats['cov'][k] +
+                   -dot(mu,stats['mean'][k].T) +
+                   -dot(stats['mean'][k], mu.T) +
+                   stats['total'][k] * dot(mu,mu.T))
+      Sigma_denom = stats['total'][k]
+      self.Sigmas[k] = Sigma_num / Sigma_denom
 
   def Z_update(self, stats, W_i_T, M_tt_1T, T, K):
     K = self.K
@@ -298,7 +314,7 @@ class SwitchingKalmanFilter(object):
     for i in range(self.K):
       A = self.As[i]
       b = reshape(self.bs[i], (x_dim, 1))
-      Qnum = ((stats['cov'][i]
+      Qnum = ((stats['cov_but_first'][i]
                - dot(stats['cor'][i], A.T)
                - dot(stats['mean_but_first'][i], b.T)) +
               (-dot(A,stats['cor'][i].T) +
