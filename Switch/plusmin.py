@@ -35,7 +35,6 @@ pi = reshape(array([0.99,0.01]), (K,))
 mus = reshape(array([[1],[-1]]), (K,x_dim))
 Sigmas = reshape(array([[0.01],[0.01]]), (K,x_dim,x_dim))
 
-#em_vars = ['As','Qs', 'bs', 'pi', 'Z', 'mus', 'Sigmas']
 em_vars = ['As', 'bs', 'Qs', 'Z', 'mus', 'Sigmas']
 s = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Z=Z)
 if SAMPLE:
