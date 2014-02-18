@@ -12,20 +12,24 @@ d = array([[2.]])
 x_dim = len(x)
 
 def construct_coeff_matrix(x_dim, x):
-  # x = [t vec(A)]
-  g_dim = 1 + 5 * x_dim
+  # x = [diag(T1) diag(T2) diag(T3) vec(A)]
+  g_dim = 6 * x_dim
   G = zeros((g_dim**2, 1 + x_dim **2))
-  # -------------------------
-  #|t v.T
-  #|v  Q
-  #|      D-Q    A
-  #|      A.T  D^{-1}
-  #|                  I-A
-  #|                      A+I
-  # -------------------------
+  # -----------------------------------------------
+  #|T1  A.T
+  #|C-B  Q
+  #|        T2 (C-B).T
+  #|        A    Q
+  #|                   T3   A.T
+  #|                   AB   Q
+  #|                            D-Q    A
+  #|                            A.T  D^{-1}
+  #|                                        I-A
+  #|                                            A+I
+  # -----------------------------------------------
 
   # First Block Column
-  # t
+  # T1
   G[0,0] = 1.
   # -Ax
   left = 0
