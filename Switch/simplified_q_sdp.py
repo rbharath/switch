@@ -1,5 +1,5 @@
 from cvxopt import matrix, solvers
-from numpy import bmat, zeros, reshape, array, dot, shape, eye
+from numpy import bmat, zeros, reshape, array, dot, shape, eye, shape
 from numpy.linalg import pinv
 from scipy.linalg import block_diag
 # Define constants
@@ -91,13 +91,13 @@ def solve_Q(A, B, D):
   x_dim = shape(A)[0]
   c = matrix([1., 0.])
   G = -construct_coeff_matrix(x_dim)
-  print "G"
-  print G
+  print "G-shape"
+  print shape(G)
   Gs = [matrix(G)]
 
   h = construct_const_matrix(A, B, D)
-  print "h"
-  print h
+  print "h-shape"
+  print shape(h)
   hs = [matrix(h)]
 
   sol = solvers.sdp(c, Gs = Gs, hs=hs)
