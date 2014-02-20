@@ -34,15 +34,12 @@ y_dim = 2
 K = 3
 NUM_ITERS = 5
 
-em_vars = ['As', 'bs', 'Qs', 'Z']
+em_vars = ['As', 'bs', 'Qs', 'Z', 'mus', 'Sigmas']
 As = zeros((K, x_dim, x_dim))
+bs = zeros((K, x_dim))
+mus = zeros((K, x_dim))
 Sigmas = zeros((K, x_dim, x_dim))
-Cs = zeros((K, y_dim, x_dim))
-Rs = zeros((K, y_dim, y_dim))
-for k in range(K):
-  Cs[k] = reshape(eye(x_dim), (y_dim, x_dim))
-  Rs[k] = reshape(0.01 * eye(y_dim), (y_dim, y_dim))
-  Sigmas[k] = reshape(0.00001 * eye(x_dim), (x_dim, x_dim))
+Qs = zeros((K, x_dim, x_dim))
 
 # Allocate Memory
 start = T/4
@@ -89,9 +86,23 @@ for traj in range(NUM_TRAJS):
     pp.show()
 
 if LEARN:
+  # Compute K-means
+  means, assignments = kmeans(xs, K)
+  W_i_Ts = assignment_to_weights(assignments,K)
+  emp_means, emp_covars = empirical_wells(xs, W_i_Ts)
+  for i in range(K):
+    A = randn(x_dim, x_dim)
+    u, s, v = svd(A)
+    As[i] = rand() * dot(u, v.T)
+    bs[i] = dot(eye(x_dim) - As[i], means[i])
+    mus[i] = emp_means[i]
+    Sigmas[i] = emp_covars[i]
+    Qs[i] = 0.5 * Sigmas[i]
+
   # Learn the Switching Filter
   bs = means
-  l = SwitchingKalmanFilter(x_dim, y_dim, K=K, bs=bs, Cs=Cs, Rs=Rs)
+  l = SwitchingKalmanFilter(x_dim, y_dim, K=K,
+      As=As,bs=bs,mus=mus,Sigmas=Sigmas,Qs=Qs)
   l.em(xs[:], em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss = l.sample(sim_T,s_init=0, x_init=means[0], y_init=means[0])
 

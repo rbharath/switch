@@ -20,7 +20,7 @@ PLOT = True
 #LEARN = False
 #PLOT = True
 
-NUM_ITERS = 5
+NUM_ITERS = 10
 T = 500
 x_dim = 1
 y_dim = 1
@@ -28,8 +28,6 @@ K = 2
 As = reshape(array([[0.5],[0.5]]), (K,x_dim,x_dim))
 bs = reshape(array([[0.5],[-0.5]]), (K,x_dim))
 Qs = reshape(array([[0.01],[0.01]]), (K,x_dim,x_dim))
-Cs = reshape(array([[1],[1]]), (K,y_dim,x_dim))
-Rs = reshape(array([[0.01],[0.01]]), (K,y_dim,y_dim))
 Z = reshape(array([[0.98, 0.02],[0.02, 0.98]]), (K,K))
 pi = reshape(array([0.99,0.01]), (K,))
 mus = reshape(array([[1],[-1]]), (K,x_dim))
@@ -55,7 +53,7 @@ if LEARN:
     u, s, v = svd(A)
     As[i] = rand() * dot(u, v.T)
     bs[i] = dot(eye(x_dim) - As[i], means[i])
-  l = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs,Qs=Qs,Z=Z)
+  l = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs)
   l.em(xs, em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss = l.sample(T,s_init=0, x_init=means[0],
       y_init=means[0])

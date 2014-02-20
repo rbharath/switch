@@ -1,8 +1,7 @@
 from cvxopt import matrix, solvers
-from numpy import bmat, zeros, reshape, array, dot, shape, eye, shape
-from numpy import sqrt
+from numpy import bmat, zeros, reshape, array, dot, shape, eye, shape, real
 from numpy.linalg import pinv
-from scipy.linalg import block_diag
+from scipy.linalg import block_diag, sqrtm
 
 # Define constants
 x_dim = 1
@@ -98,7 +97,7 @@ def construct_const_matrix(x_dim, A, B, D):
   #|                    0
   #|                      0
   # -----------------------
-  F = sqrt(B)
+  F = real(sqrtm(B))
   # Construct B1
   B1 = zeros((2 * x_dim, 2 * x_dim))
   B1[x_dim:,:x_dim] = F
@@ -134,17 +133,17 @@ def solve_Q(x_dim, A, B, D):
 
   G = construct_coeff_matrix(x_dim, B)
   G = -G # set negative since s = h - Gx in cvxopt's sdp solver
-  print "G-shape"
-  print shape(G)
+  #print "G-shape"
+  #print shape(G)
   Gs = [matrix(G)]
 
   h,_ = construct_const_matrix(x_dim, A, B, D)
-  print "h-shape"
-  print shape(h)
+  #print "h-shape"
+  #print shape(h)
   hs = [matrix(h)]
 
   sol = solvers.sdp(cm, Gs = Gs, hs=hs)
-  print sol['x']
+  #print sol['x']
   return sol, c, G, h
 
-sol, c, G, h = solve_Q(x_dim, A, b, D)
+sol, c, G, h = solve_Q(x_dim, A, B, D)

@@ -7,14 +7,13 @@ from numpy.random import randint, randn, multinomial, multivariate_normal
 from numpy.random import rand
 from Kmeans import *
 from utils import *
+from simplified_a_sdp import *
+from simplified_q_sdp import *
 import scipy.linalg as linalg
 import scipy.stats as stats
 import sys
 """
-An Implementation of the Switching Kalman Filter. Uses the Generalized-
-Pseudo-Bayesian algorithm of order 2, which collapses the exponentially
-large posterior to finitely many Gaussians through moment matching, to
-perform smooothing on the hidden real-valued states. A forward-backward
+An Implementation of the Metastable Switching LDS. A forward-backward
 inference pass computes switch posteriors from the smoothed hidden states.
 The switch posteriors are used in the M-step to update parameter estimates.
 @author: Bharath Ramsundar
@@ -165,7 +164,6 @@ class SwitchingKalmanFilter(object):
     W_i_Ts = zeros((em_iters, T, K))
     assignments = self.Viterbi(ys)
     while itr < em_iters:
-      #print "\t\tLog_ll = %s" % str(log_ll_ts[T-1])
       assignments = self.Viterbi(ys)
       W_i_T = assignment_to_weights(assignments, K)
       Zhat = transition_counts(assignments, K)
@@ -229,39 +227,37 @@ class SwitchingKalmanFilter(object):
       P_cur[t] = outer(xs[t], xs[t])
     # Update As
     if 'As' in em_vars:
-      self.A_update(stats, T, x_dim, W_i_T, ys, alpha, covars,
-            P_cur_prev, P_cur, itr)
+      self.A_update(stats, covars)
     # Update bs
     if 'bs' in em_vars:
-      self.b_update(T, x_dim, W_i_T, ys, alpha, means,
-          covars, P_cur_prev, P_cur, itr)
+      self.b_update(stats, means)
     # Update Qs
     if 'Qs' in em_vars:
-      self.Q_update(stats, T, x_dim, W_i_T, ys, alpha, itr, covars)
+      self.Q_update(stats, covars)
     # Update mus
     if 'mus' in em_vars:
-      self.mu_update(stats, W_i_T, ys, itr)
+      self.mu_update(stats)
     # Update Sigmas
     if 'Sigmas' in em_vars:
-      self.Sigma_update(stats, W_i_T, ys, itr)
+      self.Sigma_update(stats)
     # Update Z
     if 'Z' in em_vars:
-      self.Z_update(stats, W_i_T, M_tt_1T, T, K)
+      self.Z_update(stats, T)
 
-  def b_update(self, T, x_dim, W_i_T, ys, alpha,
-      means, covars, P_cur_prev, P_cur, itr):
+  def b_update(self, stats, means):
     K, x_dim = self.K, self.x_dim
     for i in range(K):
-      self.bs[i] = dot(eye(x_dim) - self.As[i], means[i])
+      mu = self.mus[i]
+      #self.bs[i] = dot(eye(x_dim) - self.As[i], means[i])
+      self.bs[i] = dot(eye(x_dim) - self.As[i], mu)
 
-  def mu_update(self, stats, W_i_T, xs, itr):
-    (T, x_dim) = shape(xs)
+  def mu_update(self, stats):
     K, x_dim = self.K, self.x_dim
     for k in range(K):
       # Use Laplace Pseudocount
       self.mus[k] = stats['mean'][k] / (stats['total'][k])
 
-  def Sigma_update(self, stats, W_i_T, xs, itr):
+  def Sigma_update(self, stats):
     K, x_dim = self.K, self.x_dim
     for k in range(K):
       mu = reshape(self.mus[k], (x_dim, 1))
@@ -272,14 +268,12 @@ class SwitchingKalmanFilter(object):
       Sigma_denom = stats['total'][k]
       self.Sigmas[k] = Sigma_num / Sigma_denom
 
-  def Z_update(self, stats, W_i_T, M_tt_1T, T, K):
+  def Z_update(self, stats, T):
     K = self.K
     Z = zeros((K,K))
     for i in range(K):
       for j in range(K):
         Z[i,j] += (T-1) * stats['transitions'][i,j]
-        #for t in range(1,T):
-        #  Z_denom += W_i_T[t,i]
         Z_denom = stats['total_but_last'][i]
         Z[i,j] /= Z_denom
     for i in range(K):
@@ -287,57 +281,71 @@ class SwitchingKalmanFilter(object):
       Z[i,:] /= s
     self.Z = Z
 
-  def A_update(self, stats, T, x_dim, W_i_T, ys, alpha, covars,
-        P_cur_prev, P_cur, itr):
+  def A_update(self, stats, covars):
     eta = 0.5
     #eta = 0.99
-    for i in range(self.K):
-      Anum = stats['cor'][i]
-      Adenom = stats['cov_but_last'][i]
-      self.As[i] = dot(Anum, linalg.pinv(Adenom))
-      u,s,v = svd(self.As[i])
-      s = maximum(minimum(s,ones(shape(s))), -1.0 * ones(shape(s)))
-      self.As[i] = eta * dot(u,dot(diag(s), v))
-      #Anum = zeros((x_dim, x_dim))
-      #Adenom = zeros((x_dim, x_dim))
-      #for t in range(1,T):
-      #  Anum += W_i_T[t,i] * P_cur_prev[t]
-      #  Adenom += W_i_T[t,i] * P_cur[t-1]
+    K, x_dim = self.K, self.x_dim
+    for i in range(K):
+      print "A_UPDATE"
+      b = reshape(self.bs[i], (x_dim, 1))
+      B = stats['cor'][i]
+      print "B = %s" % str(B)
+      mean_but_last = reshape(stats['mean_but_last'][i], (x_dim, 1))
+      C = dot(b, mean_but_last.T)
+      print "C = %s" % str(C)
+      E = stats['cov_but_last'][i]
+      Sigma = self.Sigmas[i]
+      #Sigma = covars[i]
+      Q = self.Qs[i]
+      print "E = %s" % str(E)
+      print "Sigma = %s" % str(Sigma)
+      print "Q = %s" % str(Q)
+      sol,_,G,_ = solve_A(x_dim, B, C, E, Sigma, Q)
+      avec = array(sol['x'])
+      print "avec"
+      print avec
+      avec = avec[1+x_dim*(x_dim+1)/2:]
+      A = reshape(avec,(x_dim, x_dim),order='F')
+      self.As[i] = A
+      #Anum = stats['cor'][i]
+      #Adenom = stats['cov_but_last'][i]
       #self.As[i] = dot(Anum, linalg.pinv(Adenom))
       #u,s,v = svd(self.As[i])
       #s = maximum(minimum(s,ones(shape(s))), -1.0 * ones(shape(s)))
       #self.As[i] = eta * dot(u,dot(diag(s), v))
 
-  def Q_update(self, stats, T, x_dim, W_i_T, xs, alpha, itr, covars):
-    eta = 2.0/(itr+2)
-    Lambda = alpha * eye(x_dim)
+  def Q_update(self, stats, covars):
+    K, x_dim = self.K, self.x_dim
     for i in range(self.K):
       A = self.As[i]
+      Sigma = self.Sigmas[i]
+      #Sigma = covars[i]
       b = reshape(self.bs[i], (x_dim, 1))
-      Qnum = ((stats['cov_but_first'][i]
+      B = ((stats['cov_but_first'][i]
                - dot(stats['cor'][i], A.T)
-               - dot(stats['mean_but_first'][i], b.T)) +
-              (-dot(A,stats['cor'][i].T) +
-                dot(A,dot(stats['cov_but_last'][i], A.T)) +
-                dot(A,dot(stats['mean_but_last'][i], b.T))) +
-              (-dot(b,stats['mean_but_first'][i].T) +
-                dot(b,dot(stats['mean_but_last'][i].T, A.T)) +
-                stats['total_but_first'][i] * dot(b, b.T)))
-      Qdenom = stats['total_but_first'][i]
-      self.Qs[i] = (1.0/Qdenom) * Qnum
-      #Qdenom = alpha
-      #Qnum = Lambda
-      #Anum = zeros((x_dim, x_dim))
-      #Adenom = zeros((x_dim, x_dim))
-      #for t in range(1,T):
-      #  x_t = xs[t]
-      #  x_t_pred = dot(self.As[i], xs[t-1]) + self.bs[i]
-      #  diff = x_t - x_t_pred
-      #  Qnum += W_i_T[t,i] * outer(diff, diff)
-      #  Qdenom += W_i_T[t,i]
-      #Qgrad = -0.5 * Qnum + 0.5 * Qdenom * self.Qs[i]
-      #Qpred = (1.0/Qdenom) * Qnum
-      #self.Qs[i] = Qpred
+               - dot(reshape(stats['mean_but_first'][i], (x_dim,1)),
+                    b.T))
+           + (-dot(A,stats['cor'][i].T) +
+              dot(A,dot(stats['cov_but_last'][i], A.T)) +
+              dot(A,dot(reshape(stats['mean_but_last'][i],(x_dim,1)),
+                        b.T)))
+           + (-dot(b,reshape(stats['mean_but_first'][i], (x_dim,1)).T) +
+              dot(b,dot(reshape(stats['mean_but_last'][i],(x_dim,1)).T,
+                        A.T)) +
+              stats['total_but_first'][i] * dot(b, b.T)))
+      print "Q_UPDATE"
+      print "A = %s" % str(A)
+      print "B = %s" % str(B)
+      print "Sigma = %s" % str(Sigma)
+      #Qdenom = stats['total_but_first'][i]
+      #self.Qs[i] = (1.0/Qdenom) * Qnum
+      sol,_,_,_ = solve_Q(x_dim, A, B, Sigma)
+      qvec = array(sol['x'])
+      print "qvec"
+      print qvec
+      qvec = qvec[1+x_dim**2:]
+      Q = reshape(qvec,(x_dim, x_dim),order='F')
+      self.Qs[i] = Q
 
   def compute_metastable_wells(self):
     """Compute the metastable wells according to the formula
