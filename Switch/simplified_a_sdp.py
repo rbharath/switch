@@ -225,13 +225,13 @@ def construct_const_matrix(x_dim, Q, D):
 
 def solve_A(x_dim, B, C, E, D, Q):
   # x = [s vec(Z) vec(A)]
-  MAX_ITERS=20
+  MAX_ITERS=30
   c_dim = 1 + x_dim*(x_dim+1)/2 + x_dim**2
   c = zeros(c_dim)
   c[0] = x_dim
   prev = 1
   for i in range(x_dim):
-    vec_pos = prev + i * x_dim + i
+    vec_pos = prev + i * (i+1)/2 + i
     c[vec_pos] = 1.
   cm = matrix(c)
 

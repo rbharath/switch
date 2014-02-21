@@ -34,7 +34,7 @@ y_dim = 2
 K = 3
 NUM_ITERS = 5
 
-em_vars = ['As', 'bs', 'Qs', 'Z', 'mus', 'Sigmas']
+em_vars = ['As', 'bs', 'Qs', 'Z', 'mus']
 As = zeros((K, x_dim, x_dim))
 bs = zeros((K, x_dim))
 mus = zeros((K, x_dim))
@@ -77,14 +77,6 @@ for traj in range(NUM_TRAJS):
       xs[traj * (T-start) + (i-start),:] = x[0,0:2]
     trajectory[i,:] = x[0,0:2]
     integrator.step(10)
-  if PLOT:
-    pp.plot(trajectory[start:,0], trajectory[start:,1], color='k')
-    # Compute K-means
-    means, assignments = kmeans(xs, K)
-    pp.scatter(means[:,0], means[:,1], color='r',zorder=10)
-    pp.scatter(xs[:,0], xs[:,1], edgecolor='none', facecolor='k',zorder=1)
-    pp.show()
-
 if LEARN:
   # Compute K-means
   means, assignments = kmeans(xs, K)
@@ -107,6 +99,11 @@ if LEARN:
   sim_xs,sim_Ss = l.sample(sim_T,s_init=0, x_init=means[0], y_init=means[0])
 
 if PLOT:
+  pp.plot(trajectory[start:,0], trajectory[start:,1], color='k')
+  # Compute K-means
+  means, assignments = kmeans(xs, K)
+  pp.scatter(means[:,0], means[:,1], color='r',zorder=10)
+  pp.scatter(xs[:,0], xs[:,1], edgecolor='none', facecolor='k',zorder=1)
   Delta = 0.5
   minx = min(xs[:,0])
   maxx = max(xs[:,0])
@@ -121,3 +118,5 @@ if PLOT:
         zorder=5,facecolor='g')
     pp.plot(sim_xs[:,0], sim_xs[:,1], zorder=5,color='g')
   MullerForce.plot(ax=pp.gca(),minx=minx,maxx=maxx,miny=miny,maxy=maxy)
+  pp.show()
+

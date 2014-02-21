@@ -44,6 +44,11 @@ else:
   Ss = reshape(loadtxt('../example/Ss.txt'), (T))
 #print "True Log-LL = %s" % str(true_log_ll)
 if LEARN:
+  As = zeros((K, x_dim, x_dim))
+  bs = zeros((K, x_dim))
+  mus = zeros((K, x_dim))
+  Sigmas = zeros((K, x_dim, x_dim))
+  Qs = zeros((K, x_dim, x_dim))
   # Compute K-means
   means, assignments = kmeans(xs, K)
   W_i_Ts = assignment_to_weights(assignments,K)
@@ -53,7 +58,11 @@ if LEARN:
     u, s, v = svd(A)
     As[i] = rand() * dot(u, v.T)
     bs[i] = dot(eye(x_dim) - As[i], means[i])
-  l = SwitchingKalmanFilter(x_dim,y_dim,K=K,As=As,bs=bs)
+    mus[i] = emp_means[i]
+    Sigmas[i] = emp_covars[i]
+    Qs[i] = 0.5 * Sigmas[i]
+  l = SwitchingKalmanFilter(x_dim,y_dim,K=K,
+      As=As,bs=bs,mus=mus,Sigmas=Sigmas,Qs=Qs)
   l.em(xs, em_iters=NUM_ITERS, em_vars=em_vars)
   sim_xs,sim_Ss = l.sample(T,s_init=0, x_init=means[0],
       y_init=means[0])

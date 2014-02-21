@@ -225,21 +225,23 @@ class SwitchingKalmanFilter(object):
       if t > 0:
         P_cur_prev[t] = outer(xs[t], xs[t-1])
       P_cur[t] = outer(xs[t], xs[t])
+    # Update Sigmas
+    if 'Sigmas' in em_vars:
+      self.Sigma_update(stats)
+    # Update Qs
+    if 'Qs' in em_vars:
+      print "ITER %d" % itr
+      self.Q_update(stats, covars)
     # Update As
     if 'As' in em_vars:
+      print "ITER %d" % itr
       self.A_update(stats, covars)
     # Update bs
     if 'bs' in em_vars:
       self.b_update(stats, means)
-    # Update Qs
-    if 'Qs' in em_vars:
-      self.Q_update(stats, covars)
     # Update mus
     if 'mus' in em_vars:
       self.mu_update(stats)
-    # Update Sigmas
-    if 'Sigmas' in em_vars:
-      self.Sigma_update(stats)
     # Update Z
     if 'Z' in em_vars:
       self.Z_update(stats, T)
@@ -286,7 +288,7 @@ class SwitchingKalmanFilter(object):
     #eta = 0.99
     K, x_dim = self.K, self.x_dim
     for i in range(K):
-      print "A_UPDATE"
+      print "A_UPDATE %d" % i
       b = reshape(self.bs[i], (x_dim, 1))
       B = stats['cor'][i]
       print "B = %s" % str(B)
@@ -306,6 +308,8 @@ class SwitchingKalmanFilter(object):
       print avec
       avec = avec[1+x_dim*(x_dim+1)/2:]
       A = reshape(avec,(x_dim, x_dim),order='F')
+      print "new-A"
+      print A
       self.As[i] = A
       #Anum = stats['cor'][i]
       #Adenom = stats['cov_but_last'][i]
@@ -333,7 +337,7 @@ class SwitchingKalmanFilter(object):
               dot(b,dot(reshape(stats['mean_but_last'][i],(x_dim,1)).T,
                         A.T)) +
               stats['total_but_first'][i] * dot(b, b.T)))
-      print "Q_UPDATE"
+      print "Q_UPDATE %d" % i
       print "A = %s" % str(A)
       print "B = %s" % str(B)
       print "Sigma = %s" % str(Sigma)
@@ -343,13 +347,20 @@ class SwitchingKalmanFilter(object):
       qvec = array(sol['x'])
       print "qvec"
       print qvec
-      qvec = qvec[1+x_dim*(x_dim+1)/2:]
-      Q = zeros((x_dim, x_dim))
-      for i in range(x_dim):
-        for j in range(i):
-          vec_pos = i*(i+1)/2+j
-          Q[i,j] = qvec[vec_pos]
-          Q[j,i] = Q[i,j]
+      if qvec is None:
+        Q = 0.5 * copy(Sigma)
+      else:
+        qvec = qvec[1+x_dim*(x_dim+1)/2:]
+        print "new-qvec"
+        print qvec
+        Q = zeros((x_dim, x_dim))
+        for i in range(x_dim):
+          for j in range(i+1):
+            vec_pos = i*(i+1)/2+j
+            Q[i,j] = qvec[vec_pos]
+            Q[j,i] = Q[i,j]
+        print "new-Q"
+        print Q
       self.Qs[i] = Q
 
   def compute_metastable_wells(self):

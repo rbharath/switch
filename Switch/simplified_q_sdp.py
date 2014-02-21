@@ -1,7 +1,7 @@
 from cvxopt import matrix, solvers
 from numpy import bmat, zeros, reshape, array, dot, shape, eye, shape, real
 from numpy import ones
-from numpy.linalg import pinv
+from numpy.linalg import pinv, eig
 from scipy.linalg import block_diag, sqrtm
 
 # Define constants
@@ -26,8 +26,9 @@ def construct_coeff_matrix(x_dim, B):
   #| F    Q
   #|        D-Q    A
   #|        A.T  D^{-1}
-  #|                    Q
-  #|                      Z
+  #|                    Q -epsilon I
+  #|                                  Z
+  #|                                    s
   # -----------------------
 
   # First Block Column
@@ -115,8 +116,8 @@ def construct_const_matrix(x_dim, A, B, D):
   #| F    0
   #|         D     A
   #|        A.T  D^{-1}
-  #|                    0
-  #|                      0
+  #|                    -epsilon I
+  #|                               0
   # -----------------------
   F = real(sqrtm(B))
   # Construct B1
@@ -135,7 +136,13 @@ def construct_const_matrix(x_dim, A, B, D):
   B3 = zeros((x_dim, x_dim))
 
   # Construct B4
-  B4 = zeros((x_dim, x_dim))
+  # Set lower bound on Q norm
+  Qprop = D - dot(A,dot(D,A.T))
+  max_eig = max(eig(Qprop)[0])
+  epsilon = 0.5 * max_eig
+  epsilon = 0.
+  print "!!!!!EPSILON = %s" % str(epsilon)
+  B4 = -epsilon * eye(x_dim)
 
   # Construct B5
   B5 = zeros((1, 1))
@@ -146,7 +153,7 @@ def construct_const_matrix(x_dim, A, B, D):
 
 def solve_Q(x_dim, A, B, D):
   # x = [s vec(Z) vec(Q)]
-  MAX_ITERS=20
+  MAX_ITERS=30
   c_dim = 1 + 2 * x_dim*(x_dim+1)/2
   c = zeros(c_dim)
   c[0] = x_dim
