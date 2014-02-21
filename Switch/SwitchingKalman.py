@@ -262,8 +262,8 @@ class SwitchingKalmanFilter(object):
     for k in range(K):
       mu = reshape(self.mus[k], (x_dim, 1))
       Sigma_num = (stats['cov'][k] +
-                   -dot(mu,stats['mean'][k].T) +
-                   -dot(stats['mean'][k], mu.T) +
+                   -dot(mu,reshape(stats['mean'][k],(x_dim,1)).T) +
+                   -dot(reshape(stats['mean'][k], (x_dim, 1)), mu.T) +
                    stats['total'][k] * dot(mu,mu.T))
       Sigma_denom = stats['total'][k]
       self.Sigmas[k] = Sigma_num / Sigma_denom
@@ -343,8 +343,13 @@ class SwitchingKalmanFilter(object):
       qvec = array(sol['x'])
       print "qvec"
       print qvec
-      qvec = qvec[1+x_dim**2:]
-      Q = reshape(qvec,(x_dim, x_dim),order='F')
+      qvec = qvec[1+x_dim*(x_dim+1)/2:]
+      Q = zeros((x_dim, x_dim))
+      for i in range(x_dim):
+        for j in range(i):
+          vec_pos = i*(i+1)/2+j
+          Q[i,j] = qvec[vec_pos]
+          Q[j,i] = Q[i,j]
       self.Qs[i] = Q
 
   def compute_metastable_wells(self):

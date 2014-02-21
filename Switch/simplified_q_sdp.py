@@ -1,23 +1,26 @@
 from cvxopt import matrix, solvers
 from numpy import bmat, zeros, reshape, array, dot, shape, eye, shape, real
+from numpy import ones
 from numpy.linalg import pinv
 from scipy.linalg import block_diag, sqrtm
 
 # Define constants
-x_dim = 1
-xs = array([1., 1.])
-b = array([0.5])
-A = array([[0.9]])
-D = array([[2]])
-v = xs[1] - dot(A,xs[0]) - b
+x_dim = 2
+xs = zeros((2,x_dim))
+xs[0] = ones(x_dim)
+xs[1] = ones(x_dim)
+b = 0.5 * ones((x_dim, 1))
+A = 0.9 * eye(x_dim)
+D = 2 * eye(x_dim)
+v = reshape(xs[1], (x_dim,1)) - dot(A,reshape(xs[0],(x_dim,1))) - b
 v = reshape(v, (len(v),1))
 B = dot(v,v.T)
 
 def construct_coeff_matrix(x_dim, B):
   # x = [s vec(Z) vec(Q)]
   # F = B^{.5}
-  g_dim = 6 * x_dim
-  G = zeros((g_dim**2, 1 + 2*x_dim **2))
+  g_dim = 6 * x_dim + 1
+  G = zeros((g_dim**2, 1 + 2 * x_dim*(x_dim+1)/2))
   # -----------------------
   #|Z+sI  F
   #| F    Q
@@ -35,8 +38,10 @@ def construct_coeff_matrix(x_dim, B):
   prev = 1
   for j in range(x_dim): # cols
     for i in range(x_dim): # rows
-      vec_pos = prev + j * x_dim + i #pos in param vector
       mat_pos = left * g_dim + j * g_dim + top + i
+      if i >= j:
+        (i,j) = (j,i)
+      vec_pos = prev + j*(j+1)/2 + i #pos in param vector
       G[mat_pos, vec_pos] += 1.
   # # sI
   prev = 0
@@ -48,21 +53,25 @@ def construct_coeff_matrix(x_dim, B):
   # Q
   left = x_dim
   top = x_dim
-  prev = 1 + x_dim**2
+  prev = 1 + x_dim*(x_dim+1)/2
   for j in range(x_dim): # cols
     for i in range(x_dim): # rows
-      vec_pos = prev + j * x_dim + i #pos in param vector
       mat_pos = left * g_dim + j * g_dim + top + i
+      if i >= j:
+        (i,j) = (j,i)
+      vec_pos = prev + j*(j+1)/2 + i #pos in param vector
       G[mat_pos, vec_pos] += 1.
   # Third Block Column
   # -Q
   left = 2 * x_dim
   top = 2 * x_dim
-  prev = 1 + x_dim**2
+  prev = 1 + x_dim*(x_dim+1)/2
   for j in range(x_dim): # cols
     for i in range(x_dim): # rows
-      vec_pos = prev + j * x_dim + i #pos in param vector
       mat_pos = left * g_dim + j * g_dim + top + i
+      if i >= j:
+        (i,j) = (j,i)
+      vec_pos = prev + j*(j+1)/2 + i #pos in param vector
       G[mat_pos, vec_pos] += -1.
   # Fourth Block Column
   # -------------------
@@ -70,21 +79,33 @@ def construct_coeff_matrix(x_dim, B):
   # Q
   left = 4 * x_dim
   top = 4 * x_dim
-  prev = 1 + x_dim**2
+  prev = 1 + x_dim*(x_dim+1)/2
   for j in range(x_dim): # cols
     for i in range(x_dim): # rows
-      vec_pos = prev + j * x_dim + i #pos in param vector
       mat_pos = left * g_dim + j * g_dim + top + i
+      if i >= j:
+        (i,j) = (j,i)
+      vec_pos = prev + j*(j+1)/2 + i #pos in param vector
       G[mat_pos, vec_pos] += 1.
   # Sixth Block Column
+  # Z
   left = 5 * x_dim
   top = 5 * x_dim
   prev = 1
   for j in range(x_dim): # cols
     for i in range(x_dim): # rows
-      vec_pos = prev + j * x_dim + i #pos in param vector
       mat_pos = left * g_dim + j * g_dim + top + i
+      if i >= j:
+        (i,j) = (j,i)
+      vec_pos = prev + j*(j+1)/2 + i #pos in param vector
       G[mat_pos, vec_pos] += 1.
+  ## s
+  left = 6 * x_dim
+  top = 6 * x_dim
+  prev = 0
+  mat_pos = left * g_dim + top
+  vec_pos = 0
+  G[mat_pos, vec_pos] += 1.
   return G
 
 def construct_const_matrix(x_dim, A, B, D):
@@ -116,18 +137,22 @@ def construct_const_matrix(x_dim, A, B, D):
   # Construct B4
   B4 = zeros((x_dim, x_dim))
 
+  # Construct B5
+  B5 = zeros((1, 1))
+
   # Construct Block matrix
-  h = block_diag(B1, B2, B3, B4)
+  h = block_diag(B1, B2, B3, B4, B5)
   return h, F
 
 def solve_Q(x_dim, A, B, D):
   # x = [s vec(Z) vec(Q)]
-  c_dim = 1 + 2 * x_dim**2
+  MAX_ITERS=20
+  c_dim = 1 + 2 * x_dim*(x_dim+1)/2
   c = zeros(c_dim)
   c[0] = x_dim
   prev = 1
   for i in range(x_dim):
-    vec_pos = prev + i * x_dim + i
+    vec_pos = prev + i * (i+1)/2 + i
     c[vec_pos] = 1
   cm = matrix(c)
 
@@ -142,6 +167,7 @@ def solve_Q(x_dim, A, B, D):
   #print shape(h)
   hs = [matrix(h)]
 
+  solvers.options['maxiters'] = MAX_ITERS
   sol = solvers.sdp(cm, Gs = Gs, hs=hs)
   #print sol['x']
   return sol, c, G, h
